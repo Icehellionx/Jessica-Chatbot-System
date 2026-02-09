@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
     scanImages: () => ipcRenderer.invoke('scan-images'),
     savePersona: (persona) => ipcRenderer.invoke('save-persona', persona),
     getPersona: () => ipcRenderer.invoke('get-persona'),
+    getAdvancedPrompt: () => ipcRenderer.invoke('get-advanced-prompt'),
+    saveAdvancedPrompt: (prompt) => ipcRenderer.invoke('save-advanced-prompt', prompt),
     setActiveProvider: (provider) => ipcRenderer.invoke('set-active-provider', provider),
     saveSummary: (summary) => ipcRenderer.invoke('save-summary', summary),
     getSummary: () => ipcRenderer.invoke('get-summary'),

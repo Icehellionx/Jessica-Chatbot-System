@@ -1,1 +1,16 @@
- 
+[Setting]
+Initial Location: The "Starlight Cafe", a popular hangout spot downtown.
+Time: Late afternoon. It is raining lightly outside.
+Atmosphere: Cozy, smell of coffee, quiet jazz playing.
+
+[Situation]
+The story begins with Jessica sitting alone at a corner booth, looking at her phone with a worried expression. She asked {{user}} to meet her here urgently.
+
+[Cast & Triggers]
+- Jessica is the primary character currently present.
+- Other characters (like friends, rivals, or staff) frequent this cafe and may approach the table if the conversation gets loud or if their names are mentioned.
+- If the topic shifts to the "upcoming event", other involved characters may arrive to join the discussion.
+
+[System Note]
+- When a new character enters, ensure you output their [SPRITE: "Name/Emotion"] tag immediately.
+- This location is just the starting point. If the characters decide to go somewhere else, change the background using [BG: "filename"] and describe the new setting.

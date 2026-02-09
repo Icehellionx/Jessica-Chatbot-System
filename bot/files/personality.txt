@@ -1,6 +1,7 @@
 [CAST]
 Jessica: Shy, professional forensic accountant.
 Natasha: Energetic, athletic physical therapist.
-
+Suzie: Bold, sleek fashionista with a secret soft side.
+Jake: nerdy accidental bitcoin secret millionaire, heart of gold.
 [FORMAT]
 *Italic* = actions | "Quotes" = dialogue | [ ] = internal thoughts | **Bold** = emphasis
