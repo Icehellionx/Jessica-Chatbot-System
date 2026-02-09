@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jessica AI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- Main Chat Interface -->
+    <div id="app-container">
+        <header>
+            <h1>Jessica AI</h1>
+            <div class="header-controls">
+                <button id="save-chat-btn">💾 Save</button>
+                <button id="load-chat-btn">📂 Load</button>
+                <button id="persona-btn">👤 Persona</button>
+                <button id="summary-btn">📜 Summary</button>
+                <button id="reset-chat-btn">🔄 Reset</button>
+                <button id="options-btn">⚙️ Options</button>
+            </div>
+        </header>
+        
+        <div id="main-body">
+            <!-- Visual Novel Side Panel -->
+            <div id="vn-panel">
+                <img id="vn-bg" src="" alt="">
+                <img id="vn-sprite" src="" alt="">
+            </div>
+
+            <!-- Resizer Handle -->
+            <div id="resizer"></div>
+
+            <!-- Chat Interface -->
+            <div id="chat-interface">
+                <div id="chat-history"></div>
+                <div id="input-area">
+                    <textarea id="user-input" placeholder="Type your message..."></textarea>
+                    <button id="undo-btn" style="background-color: #555;">Undo</button>
+                    <button id="send-btn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- First Run / Setup Modal -->
+    <div id="setup-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Welcome!</h2>
+            <p>To get started, please provide an API key for one of the supported providers.</p>
+            
+            <div class="form-group">
+                <label for="setup-provider">Provider:</label>
+                <select id="setup-provider">
+                    <option value="chutes">Chutes.ai</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="chatgpt">ChatGPT (OpenAI)</option>
+                    <option value="grok">Grok (xAI)</option>
+                    <option value="featherless">Featherless.ai</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="setup-key">API Key:</label>
+                <input type="password" id="setup-key" placeholder="sk-...">
+            </div>
+
+            <div class="form-group">
+                <label for="setup-model">Model ID (Optional):</label>
+                <input type="text" id="setup-model" placeholder="e.g. gemini-1.5-flash">
+            </div>
+
+            <button id="save-setup-btn" class="primary-btn">Save & Start</button>
+        </div>
+    </div>
+
+    <!-- Options Modal -->
+    <div id="options-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Options</h2>
+                <button id="close-options-btn" class="close-btn">×</button>
+            </div>
+            
+            <h3>Manage API Keys</h3>
+            <div id="keys-list">
+                <!-- Keys will be injected here by JS -->
+            </div>
+
+            <hr>
+            <h3>Tools</h3>
+            <button id="test-provider-btn" class="primary-btn" style="background-color: #28a745; margin-bottom: 10px;">Test Active Provider</button>
+            <button id="scan-images-btn" class="primary-btn">Scan & Tag Images</button>
+            <p style="font-size: 0.8em; color: #888; margin-top: 5px;">Automatically describes new images in bot/files using AI.</p>
+
+            <hr>
+
+            <h3>Add / Update Key</h3>
+            <div class="form-group">
+                <select id="options-provider">
+                    <option value="chutes">Chutes.ai</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="chatgpt">ChatGPT (OpenAI)</option>
+                    <option value="grok">Grok (xAI)</option>
+                    <option value="featherless">Featherless.ai</option>
+                </select>
+                <input type="password" id="options-key" placeholder="New API Key">
+                <input type="text" id="options-model" placeholder="Model ID (e.g. gpt-4o)">
+                <button id="update-key-btn">Save Key</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Chat Modal -->
+    <div id="load-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Select a Chat</h2>
+                <button id="close-load-btn" class="close-btn">×</button>
+            </div>
+            <div id="saved-chats-list"></div>
+        </div>
+    </div>
+
+    <!-- Persona Modal -->
+    <div id="persona-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>User Persona</h2>
+                <button id="close-persona-btn" class="close-btn">×</button>
+            </div>
+            <div class="form-group">
+                <label for="persona-name">Name:</label>
+                <input type="text" id="persona-name" placeholder="e.g. Cy Roark">
+            </div>
+            <div class="form-group">
+                <label for="persona-details">Description / Details:</label>
+                <textarea id="persona-details" rows="5" style="width: 100%; background-color: #fff; border: 2px inset #fff; color: #000; font-family: 'Tahoma', sans-serif; padding: 5px; box-sizing: border-box;" placeholder="e.g. Male, Age: 35, Detective..."></textarea>
+            </div>
+            <button id="save-persona-btn" class="primary-btn">Save Persona</button>
+        </div>
+    </div>
+
+    <!-- Summary Modal -->
+    <div id="summary-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>History Summary</h2>
+                <button id="close-summary-btn" class="close-btn">×</button>
+            </div>
+            <p style="font-size: 0.8em; color: #aaa;">This summary updates automatically every 10 turns.</p>
+            <textarea id="summary-content" rows="10" style="width: 100%; background-color: #fff; border: 2px inset #fff; color: #000; font-family: 'Tahoma', sans-serif; padding: 5px; box-sizing: border-box;" placeholder="Story summary..."></textarea>
+            <button id="save-summary-btn" class="primary-btn">Save Summary</button>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

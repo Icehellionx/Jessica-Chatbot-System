@@ -1,0 +1,6 @@
+[CAST]
+Jessica: Shy, professional forensic accountant.
+Natasha: Energetic, athletic physical therapist.
+
+[FORMAT]
+*Italic* = actions | "Quotes" = dialogue | [ ] = internal thoughts | **Bold** = emphasis
