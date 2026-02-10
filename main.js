@@ -1,162 +1,249 @@
+'use strict';
+
 const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Fix for "Unable to move the cache" errors on Windows
+/* ============================================================================
+   MAIN PROCESS BOOTSTRAP
+   - Creates folders
+   - Registers custom protocol: bot-resource://
+   - Creates main window
+   - Autosaves on quit
+   - Loads IPC handlers
+   ========================================================================== */
+
+/* ----------------------------- ELECTRON FLAGS ---------------------------- */
+/**
+ * These switches are heavy-handed; keep them only if you truly need them.
+ * - disable-http-cache can impact performance.
+ * - autoplay-policy no-user-gesture-required is convenient but may have side effects.
+ */
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-http-cache');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+/* ------------------------------ PATHS ----------------------------------- */
+
 const userDataPath = app.getPath('userData');
-const configPath = path.join(userDataPath, 'config.json');
-const chatsPath = path.join(userDataPath, 'chats');
-const botFilesPath = path.join(__dirname, 'bot', 'files');
-const botImagesPath = path.join(__dirname, 'bot', 'files');
-const personaPath = path.join(userDataPath, 'persona.json');
-const summaryPath = path.join(userDataPath, 'summary.json');
-const currentChatPath = path.join(userDataPath, 'current-chat.json');
-const advancedPromptPath = path.join(botFilesPath, 'advanced_prompt.txt');
-const characterStatePath = path.join(userDataPath, 'character_state.json');
-const lorebookPath = path.join(userDataPath, 'aura_lorebook.json');
 
-// Ensure bot files directory exists
-if (!fs.existsSync(botFilesPath)) {
-    fs.mkdirSync(botFilesPath, { recursive: true });
-}
+const paths = {
+  userDataPath,
+  configPath: path.join(userDataPath, 'config.json'),
+  chatsPath: path.join(userDataPath, 'chats'),
 
-if (!fs.existsSync(path.join(botImagesPath, 'backgrounds'))) {
-    fs.mkdirSync(path.join(botImagesPath, 'backgrounds'), { recursive: true });
-}
-if (!fs.existsSync(path.join(botImagesPath, 'sprites'))) {
-    fs.mkdirSync(path.join(botImagesPath, 'sprites'), { recursive: true });
-}
-if (!fs.existsSync(path.join(botFilesPath, 'characters'))) {
-    fs.mkdirSync(path.join(botFilesPath, 'characters'), { recursive: true });
-}
-if (!fs.existsSync(path.join(botImagesPath, 'splash'))) {
-    fs.mkdirSync(path.join(botImagesPath, 'splash'), { recursive: true });
-}
-if (!fs.existsSync(path.join(botFilesPath, 'music'))) {
-    fs.mkdirSync(path.join(botFilesPath, 'music'), { recursive: true });
-}
-if (!fs.existsSync(path.join(botImagesPath, 'title'))) {
-    fs.mkdirSync(path.join(botImagesPath, 'title'), { recursive: true });
+  // You currently store both “files” and “images” under bot/files.
+  // If you later split, set botImagesPath to a different directory.
+  botFilesPath: path.join(__dirname, 'bot', 'files'),
+  botImagesPath: path.join(__dirname, 'bot', 'files'),
+
+  personaPath: path.join(userDataPath, 'persona.json'),
+  summaryPath: path.join(userDataPath, 'summary.json'),
+  currentChatPath: path.join(userDataPath, 'current-chat.json'),
+  advancedPromptPath: path.join(__dirname, 'bot', 'files', 'advanced_prompt.txt'),
+  characterStatePath: path.join(userDataPath, 'character_state.json'),
+  lorebookPath: path.join(userDataPath, 'aura_lorebook.json'),
+};
+
+/* ------------------------------ DIR SETUP -------------------------------- */
+
+function ensureDir(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (e) {
+    console.error(`[FS] Failed to create dir: ${dirPath}`, e);
+  }
 }
 
-if (!fs.existsSync(chatsPath)) {
-    fs.mkdirSync(chatsPath);
+function ensureRequiredDirs() {
+  // App storage
+  ensureDir(paths.userDataPath);
+  ensureDir(paths.chatsPath);
+
+  // Bot folders
+  ensureDir(paths.botFilesPath);
+  ensureDir(path.join(paths.botFilesPath, 'characters'));
+
+  // Media folders (served via bot-resource)
+  const mediaDirs = ['backgrounds', 'sprites', 'splash', 'music', 'title', 'characters'];
+  for (const d of mediaDirs) ensureDir(path.join(paths.botImagesPath, d));
 }
 
-// Register the custom protocol as privileged so it works like a standard URL
+/* -------------------------- CUSTOM PROTOCOL ----------------------------- */
+
 protocol.registerSchemesAsPrivileged([
-    { scheme: 'bot-resource', privileges: { secure: true, standard: true, supportFetchAPI: true, bypassCSP: true } }
+  {
+    scheme: 'bot-resource',
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+    },
+  },
 ]);
 
-function createWindow() {
-    const win = new BrowserWindow({
-        width: 1024,
-        height: 768,
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            nodeIntegration: false,
-            contextIsolation: true
-        }
-    });
+/**
+ * Normalize a protocol URL path and prevent escaping the allowed root dir.
+ */
+function resolveSafeResourcePath(rootDir, requestedPath) {
+  // decode + remove leading slash
+  let rel = decodeURIComponent(String(requestedPath || '')).replace(/^\/+/, '');
 
-    win.loadFile('index.html');
-    // win.webContents.openDevTools(); // Uncomment for debugging
+  // Normalize to remove ../ and weird separators
+  rel = rel.replace(/\\/g, '/'); // unify
+  const normalized = path.normalize(rel);
+
+  // If normalized path tries to escape, reject
+  if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+    return null;
+  }
+
+  const full = path.join(rootDir, normalized);
+
+  // Enforce root containment
+  const rootResolved = path.resolve(rootDir);
+  const fullResolved = path.resolve(full);
+  if (!fullResolved.startsWith(rootResolved + path.sep) && fullResolved !== rootResolved) {
+    return null;
+  }
+
+  return fullResolved;
 }
 
+function registerBotResourceProtocol() {
+  const cache = new Map(); // requestedRel -> resolved absolute
+
+  const tryExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp3', '.wav', '.ogg'];
+  const subdirs = ['characters', 'sprites', 'backgrounds', 'splash', 'music', 'title'];
+
+  protocol.registerFileProtocol('bot-resource', (request, callback) => {
+    try {
+      const url = String(request.url || '');
+      const rel = url.replace(/^bot-resource:\/\//, '');
+
+      // fast cache
+      if (cache.has(rel)) {
+        return callback({ path: cache.get(rel) });
+      }
+
+      // 1) direct resolve under root
+      let resolved = resolveSafeResourcePath(paths.botImagesPath, rel);
+
+      // If unsafe, abort
+      if (!resolved) {
+        return callback({ error: -6 }); // FILE_NOT_FOUND
+      }
+
+      // 2) If not exists, try subdir fallbacks & extension fallbacks
+      if (!fs.existsSync(resolved)) {
+        // Try searching in known subdirectories
+        for (const sub of subdirs) {
+          const candidate = resolveSafeResourcePath(paths.botImagesPath, path.join(sub, rel));
+          if (candidate && fs.existsSync(candidate)) {
+            resolved = candidate;
+            break;
+          }
+        }
+
+        // Try adding extensions if still missing
+        if (!fs.existsSync(resolved)) {
+          for (const ext of tryExtensions) {
+            if (fs.existsSync(resolved + ext)) {
+              resolved = resolved + ext;
+              break;
+            }
+          }
+        }
+      }
+
+      // Still missing
+      if (!fs.existsSync(resolved)) {
+        return callback({ error: -6 }); // FILE_NOT_FOUND
+      }
+
+      cache.set(rel, resolved);
+      return callback({ path: resolved });
+    } catch (e) {
+      console.error('[Protocol] bot-resource error:', e);
+      return callback({ error: -2 }); // FAILED
+    }
+  });
+}
+
+/* ------------------------------ WINDOW ---------------------------------- */
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    backgroundColor: '#222222',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  win.loadFile('index.html');
+
+  // win.webContents.openDevTools({ mode: 'detach' });
+  return win;
+}
+
+/* ------------------------------ AUTOSAVE -------------------------------- */
+
+function autosaveIfNeeded() {
+  try {
+    if (!fs.existsSync(paths.currentChatPath)) return;
+
+    const raw = fs.readFileSync(paths.currentChatPath, 'utf8');
+    if (!raw) return;
+
+    const data = JSON.parse(raw);
+
+    // Only autosave if there’s at least one user message
+    const msgs = data?.messages;
+    if (!Array.isArray(msgs) || !msgs.some(m => m?.role === 'user')) return;
+
+    const now = new Date();
+    const timestamp = now.toISOString()
+      .replace(/T/, '_')
+      .replace(/\..+/, '')
+      .replace(/:/g, '-');
+
+    const filename = `autosave_${timestamp}.json`;
+
+    // Save the whole object if present; fallback to messages array if older format
+    const payload = data?.messages ? data : msgs;
+    fs.writeFileSync(path.join(paths.chatsPath, filename), JSON.stringify(payload, null, 2), 'utf8');
+
+    console.log(`[Autosave] Saved to ${filename}`);
+  } catch (e) {
+    console.error('[Autosave] Failed:', e);
+  }
+}
+
+/* ------------------------------ APP LIFECYCLE ---------------------------- */
+
 app.whenReady().then(() => {
-    const pathCache = new Map();
+  ensureRequiredDirs();
+  registerBotResourceProtocol();
+  createWindow();
 
-    // Register protocol to serve images from bot/pictures
-    protocol.registerFileProtocol('bot-resource', (request, callback) => {
-        let url = request.url.replace('bot-resource://', '');
-        
-        // Remove leading slash if present (e.g. bot-resource:///path)
-        if (url.startsWith('/')) {
-            url = url.slice(1);
-        }
-
-        const decodedUrl = decodeURIComponent(url);
-        if (pathCache.has(decodedUrl)) {
-            return callback(pathCache.get(decodedUrl));
-        }
-
-        let fullPath = path.join(botImagesPath, decodedUrl);
-
-        // Smart Fallback: If exact file doesn't exist, try adding extensions
-        if (!fs.existsSync(fullPath)) {
-            
-            // 1. Try searching in subdirectories (for short paths like "Jessica/happy.png")
-            const subdirs = ['characters', 'sprites', 'backgrounds', 'splash', 'music', 'title'];
-            for (const subdir of subdirs) {
-                const subPath = path.join(botImagesPath, subdir, decodedUrl);
-                if (fs.existsSync(subPath)) {
-                    fullPath = subPath;
-                    break;
-                }
-            }
-
-            const extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp3', '.wav', '.ogg'];
-            for (const ext of extensions) {
-                if (fs.existsSync(fullPath + ext)) {
-                    fullPath = fullPath + ext;
-                    break;
-                }
-            }
-        }
-
-        try {
-            pathCache.set(decodedUrl, fullPath);
-            return callback(fullPath);
-        } catch (error) {
-            console.error('Failed to register protocol', error);
-        }
-    });
-
-    createWindow();
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
-        }
-    });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 });
 
 app.on('window-all-closed', () => {
-    // Autosave current chat before quitting
-    try {
-        if (fs.existsSync(currentChatPath)) {
-            const data = JSON.parse(fs.readFileSync(currentChatPath, 'utf8'));
-            // Only autosave if there is actual conversation history (at least one user message)
-            if (data.messages && Array.isArray(data.messages) && data.messages.some(m => m.role === 'user')) {
-                const now = new Date();
-                const timestamp = now.toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
-                const filename = `autosave_${timestamp}.json`;
-                fs.writeFileSync(path.join(chatsPath, filename), JSON.stringify(data.messages, null, 2));
-                console.log(`[Autosave] Chat history saved to ${filename}`);
-            }
-        }
-    } catch (e) {
-        console.error("[Autosave] Failed to save chat history:", e);
-    }
-    app.quit();
+  autosaveIfNeeded();
+
+  // On macOS apps commonly stay open; if you want that behavior:
+  // if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });
 
-// --- Load IPC Handlers ---
-const paths = {
-    userDataPath,
-    configPath,
-    chatsPath,
-    botFilesPath,
-    botImagesPath,
-    personaPath,
-    summaryPath,
-    currentChatPath,
-    advancedPromptPath,
-    characterStatePath,
-    lorebookPath
-};
+/* ------------------------------ IPC HANDLERS ----------------------------- */
+
 require('./ipcHandlers')(paths);

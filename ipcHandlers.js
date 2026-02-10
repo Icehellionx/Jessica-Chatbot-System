@@ -1,281 +1,715 @@
+'use strict';
+
 const { ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
+const aiService = require('./ai_services');
 
-module.exports = function(paths) {
-    const {
-        userDataPath,
-        configPath,
-        chatsPath,
-        botFilesPath,
-        botImagesPath,
-        personaPath,
-        summaryPath,
-        currentChatPath,
-        advancedPromptPath,
-        characterStatePath,
-        lorebookPath
-    } = paths;
+/* ============================================================================
+   IPC MAIN HANDLERS (Electron)
+   Responsibilities:
+   - Persist config/persona/summary/lore/state/chats
+   - Scan images + build manifest
+   - Orchestrate send-chat (prompt + context mgmt + streaming)
+   ========================================================================== */
 
-    // --- State ---
-    const fileCache = {
-        timestamp: 0,
-        data: {}
+/* ------------------------------ CONSTANTS -------------------------------- */
+
+const CACHE_TTL_MS = 60_000;
+
+const MEDIA_EXT_RE = /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i;
+
+const PROVIDER_CATEGORIES = ['backgrounds', 'sprites', 'splash', 'music'];
+const SPRITES_SPECIAL_PREFIXES = new Set(['sprites', 'characters', 'backgrounds', 'splash', 'music']);
+
+const DEFAULT_PERSONA = { name: 'Jim', details: '' };
+const DEFAULT_SUMMARY = { content: '' };
+
+/* ------------------------------ FILE UTILS -------------------------------- */
+
+function readTextSafe(filePath, fallback = '') {
+  try {
+    return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readJsonSafe(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Safer write:
+ * - write to temp file
+ * - rename into place
+ * Reduces chance of file corruption on crash.
+ */
+function writeJsonSafe(filePath, data) {
+  try {
+    const tmp = `${filePath}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmp, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function writeTextSafe(filePath, text) {
+  try {
+    const tmp = `${filePath}.tmp`;
+    fs.writeFileSync(tmp, String(text ?? ''), 'utf8');
+    fs.renameSync(tmp, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeFilename(name) {
+  return String(name ?? '')
+    .replace(/[^a-z0-9]/gi, '_')
+    .toLowerCase()
+    .slice(0, 80) || 'chat';
+}
+
+/* ------------------------------ MEDIA UTILS ------------------------------ */
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.png': 'image/png',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+/**
+ * Walk a directory recursively and return "prefix/relative/path.ext" entries.
+ */
+function scanDirectoryRecursively(rootDir, prefix = '') {
+  const results = [];
+  if (!fs.existsSync(rootDir)) return results;
+
+  try {
+    const items = fs.readdirSync(rootDir, { withFileTypes: true });
+
+    for (const item of items) {
+      const full = path.join(rootDir, item.name);
+      const rel = `${prefix}${item.name}`;
+
+      if (item.isDirectory()) {
+        results.push(...scanDirectoryRecursively(full, `${rel}/`));
+      } else if (MEDIA_EXT_RE.test(item.name)) {
+        results.push(rel);
+      }
+    }
+  } catch (e) {
+    console.error(`Error scanning ${rootDir}:`, e);
+  }
+
+  return results;
+}
+
+/**
+ * Files may come from:
+ * - botImagesPath/<category>/...
+ * - for sprites category: also botFilesPath/characters/<char>/... (character sprites)
+ *
+ * Returns entries like:
+ * - backgrounds/foo.png
+ * - sprites/charA/happy.png
+ * - characters/charB/sprite.png
+ */
+function listCategoryFiles({ botImagesPath, botFilesPath }, category) {
+  if (category === 'sprites') {
+    const a = scanDirectoryRecursively(path.join(botImagesPath, 'sprites'), 'sprites/');
+    const b = scanDirectoryRecursively(path.join(botFilesPath, 'characters'), 'characters/');
+    return [...a, ...b];
+  }
+
+  return scanDirectoryRecursively(path.join(botImagesPath, category), `${category}/`);
+}
+
+/**
+ * Given a manifest object and category file list, ensure every file has a label entry.
+ * (UI expects manifest[category][file] exists for listing.)
+ */
+function ensureManifestCoverage(manifest, category, files) {
+  if (!manifest[category]) manifest[category] = {};
+  for (const f of files) {
+    if (!manifest[category][f]) manifest[category][f] = f;
+  }
+}
+
+function createTreeList(files, category, manifest) {
+  if (!Array.isArray(files) || files.length === 0) return null;
+
+  const tree = {};
+
+  for (const file of files) {
+    const parts = file.split('/');
+    const filename = parts.pop();
+    const nameWithoutExt = path.parse(filename).name;
+
+    // Heuristic grouping:
+    // - If it's under "<knownPrefix>/<group>/file" → group = <group>
+    // - else group = last folder or Common
+    let group = 'Common';
+    if (parts.length > 0) {
+      const first = parts[0];
+      if (SPRITES_SPECIAL_PREFIXES.has(first) && parts.length > 1) group = parts[1];
+      else group = parts[parts.length - 1];
+    }
+
+    // Remove duplicated group prefix in filename, e.g. "jessica_happy" inside group "jessica"
+    let cleanName = nameWithoutExt;
+    if (group !== 'Common' && cleanName.toLowerCase().startsWith(group.toLowerCase())) {
+      const potential = cleanName.slice(group.length).replace(/^[_\-\s]+/, '');
+      if (potential) cleanName = potential;
+    }
+
+    if (!tree[group]) tree[group] = [];
+
+    const desc = manifest?.[category]?.[file] ?? '';
+    let entry = cleanName;
+
+    // Append description only if it adds information vs the name
+    if (desc) {
+      const d = String(desc).trim();
+      const dn = d.toLowerCase();
+      const nn = cleanName.toLowerCase();
+      if (dn && dn !== nn && !dn.includes(nn)) {
+        entry += ` : ${d}`;
+      }
+    }
+
+    tree[group].push(entry);
+  }
+
+  const lines = [];
+  for (const group of Object.keys(tree).sort()) {
+    const items = tree[group].sort().join(', ');
+    lines.push(group === 'Common' ? items : `${group}: ${items}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Convert a manifest entry path (like "backgrounds/foo.png" or "characters/jessica/a.png")
+ * into an absolute on-disk path.
+ */
+function resolveMediaAbsolutePath({ botImagesPath, botFilesPath }, relativePath) {
+  const parts = String(relativePath).split(/[\/\\]/);
+  const rootKey = parts[0];
+
+  // backgrounds/splash/music/sprites live under botImagesPath
+  if (rootKey === 'backgrounds' || rootKey === 'splash' || rootKey === 'music' || rootKey === 'sprites') {
+    return path.join(botImagesPath, relativePath);
+  }
+
+  // characters live under botFilesPath
+  if (rootKey === 'characters') {
+    return path.join(botFilesPath, relativePath);
+  }
+
+  // fallback (safer than assuming botFilesPath)
+  return path.join(botImagesPath, relativePath);
+}
+
+/* ------------------------------ TOKEN EST -------------------------------- */
+
+/**
+ * Rough token estimate:
+ * - Strings: length/4 heuristic (your original)
+ * - Array content: sum of text parts + small overhead for images
+ */
+function estimateTokensFromMessageContent(content) {
+  if (content == null) return 0;
+
+  if (typeof content === 'string') return Math.ceil(content.length / 4);
+
+  if (Array.isArray(content)) {
+    let chars = 0;
+    for (const c of content) {
+      if (c?.type === 'text' && typeof c.text === 'string') chars += c.text.length;
+      if (c?.type === 'image_url') chars += 200; // tiny overhead placeholder
+    }
+    return Math.ceil(chars / 4);
+  }
+
+  // Unknown object shape
+  return Math.ceil(String(content).length / 4);
+}
+
+function estimateTokensForMessages(messages) {
+  return messages.reduce((sum, m) => sum + estimateTokensFromMessageContent(m?.content), 0);
+}
+
+/* ------------------------------ CACHE ------------------------------------ */
+
+function createCache() {
+  // Separate timestamps per key to avoid “manifest refresh invalidates file lists”
+  return {
+    ttlMs: CACHE_TTL_MS,
+    entries: new Map(), // key -> { ts, value }
+    get(key) {
+      const hit = this.entries.get(key);
+      if (!hit) return null;
+      if (Date.now() - hit.ts > this.ttlMs) return null;
+      return hit.value;
+    },
+    set(key, value) {
+      this.entries.set(key, { ts: Date.now(), value });
+      return value;
+    },
+    invalidate(key) {
+      if (key) this.entries.delete(key);
+      else this.entries.clear();
+    },
+  };
+}
+
+/* ------------------------------ PROMPT BUILD ----------------------------- */
+
+function filterRelevantAssets(files, recentText) {
+  if (!files || files.length === 0) return [];
+  // If list is small, just return it all
+  if (files.length <= 30) return files;
+
+  const text = (recentText || '').toLowerCase();
+  // 1. Priority: Files mentioned in recent text
+  const relevant = files.filter(f => text.includes(path.parse(f).name.toLowerCase()));
+  
+  // 2. Fill remaining slots with other files up to a limit (e.g. 20)
+  const others = files.filter(f => !relevant.includes(f));
+  return [...relevant, ...others.slice(0, 20)];
+}
+
+function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, recentText) {
+  // Filter lists to prevent token explosion
+  const allBackgrounds = listCategoryFiles({ botImagesPath, botFilesPath }, 'backgrounds');
+  const backgrounds = filterRelevantAssets(allBackgrounds, recentText);
+  const splashes = filterRelevantAssets(listCategoryFiles({ botImagesPath, botFilesPath }, 'splash'), recentText);
+  const music = filterRelevantAssets(listCategoryFiles({ botImagesPath, botFilesPath }, 'music'), recentText);
+
+  let sprites = listCategoryFiles({ botImagesPath, botFilesPath }, 'sprites');
+
+  // Optional filter: only sprites for active characters
+  if (Array.isArray(options?.activeCharacters) && options.activeCharacters.length) {
+    const activeSet = new Set(options.activeCharacters.map(c => String(c).toLowerCase()));
+    sprites = sprites.filter(file => {
+      const parts = file.split(/[/\\]/);
+      // sprites/<char>/... OR characters/<char>/...
+      return parts.length > 2 ? activeSet.has(String(parts[1]).toLowerCase()) : true;
+    });
+  }
+
+  const bgList = createTreeList(backgrounds, 'backgrounds', manifest);
+  const spriteList = createTreeList(sprites, 'sprites', manifest);
+  const splashList = createTreeList(splashes, 'splash', manifest);
+  const musicList = createTreeList(music, 'music', manifest);
+
+  if (!bgList && !spriteList && !splashList && !musicList) return '';
+
+  let visualPrompt = `\n[VISUAL NOVEL MODE]`;
+  if (bgList) visualPrompt += `\nBackgrounds:\n${bgList}`;
+  if (spriteList) visualPrompt += `\nSprites:\n${spriteList}`;
+  if (splashList) visualPrompt += `\nSplash Art:\n${splashList}`;
+  if (musicList) visualPrompt += `\nMusic:\n${musicList}`;
+
+  visualPrompt += `\n\nINSTRUCTIONS:
+1. Output visual tags ONLY at the start or end of the message.
+2. [BG: "name"] changes background.
+3. [SPRITE: "Char/Name"] updates character.
+4. [SPLASH: "name"] overrides all.
+5. [MUSIC: "name"] plays background music.
+6. Max 4 characters.
+7. [HIDE: "Char"] removes character. [HIDE: "All"] removes everyone.
+8. Sprites are STICKY. Only tag on change.`;
+
+  return visualPrompt;
+}
+
+function buildStateInjection(characterState, activeCharacters) {
+  if (!characterState || typeof characterState !== 'object') return '';
+  if (!Array.isArray(activeCharacters) || !activeCharacters.length) return '';
+
+  const keys = Object.keys(characterState);
+  if (!keys.length) return '';
+
+  let out = `\n\n[CURRENT CHARACTER STATES (DYNAMIC)]`;
+
+  for (const char of activeCharacters) {
+    const key = keys.find(k => k.toLowerCase() === String(char).toLowerCase());
+    if (key && characterState[key]) {
+      out += `\n${key}: ${JSON.stringify(characterState[key])}`;
+    }
+  }
+
+  return out === `\n\n[CURRENT CHARACTER STATES (DYNAMIC)]` ? '' : out;
+}
+
+function buildLoreInjection(lorebook, recentMessages) {
+  if (!Array.isArray(lorebook) || !lorebook.length) return '';
+
+  const recentText = recentMessages
+    .slice(-3)
+    .map(m => String(m?.content ?? '').toLowerCase())
+    .join(' ');
+
+  let lines = [];
+
+  for (const entry of lorebook) {
+    const keywords = entry?.keywords;
+    if (!Array.isArray(keywords) || !keywords.length) continue;
+
+    const hit = keywords.some(k => recentText.includes(String(k).toLowerCase()));
+    if (!hit) continue;
+
+    const text = entry?.scenario || entry?.entry;
+    if (text) lines.push(`- ${text}`);
+  }
+
+  return lines.length ? `\n\n[RELEVANT LORE]\n${lines.join('\n')}` : '';
+}
+
+function buildEnforcementRules({ stateInjection, loreInjection, advancedPromptContent }) {
+  return `\n\n[SYSTEM ENFORCEMENT]
+1. DO NOT speak for the user.
+2. Maintain distinct personalities.
+3. Ensure each character's voice remains consistent.
+4. Manage the stage. If a character leaves, use [HIDE: Name].${stateInjection}${loreInjection}${advancedPromptContent ? `\n\n${advancedPromptContent}` : ''}`;
+}
+
+/**
+ * Keeps as much recent history as possible under maxContext.
+ * - Preserves (optional) first system message
+ * - Appends suffix to system content (visual/enforcement)
+ */
+function applyContextWindow(messages, { maxContext, systemSuffix }) {
+  const copy = structuredCloneSafe(messages);
+
+  const sysIndex = copy.findIndex(m => m.role === 'system');
+  const sysMsg = sysIndex > -1 ? copy[sysIndex] : null;
+
+  const baseSysTokens = sysMsg ? estimateTokensFromMessageContent(sysMsg.content) : 0;
+  const suffixTokens = Math.ceil(systemSuffix.length / 4);
+
+  // Safety reserve so you don't hit hard model limits
+  const reserve = 1000;
+  const available = Math.max(0, (maxContext ?? 128000) - baseSysTokens - suffixTokens - reserve);
+
+  const history = copy.filter((_, i) => i !== sysIndex);
+  const kept = [];
+
+  let used = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msgTokens = estimateTokensFromMessageContent(history[i]?.content);
+    if (used + msgTokens <= available) {
+      kept.unshift(history[i]);
+      used += msgTokens;
+    } else {
+      break;
+    }
+  }
+
+  const out = [];
+  if (sysMsg) out.push(sysMsg);
+  out.push(...kept);
+
+  // Ensure a system message exists and gets the suffix.
+  const outSysIndex = out.findIndex(m => m.role === 'system');
+  if (outSysIndex > -1) {
+    out[outSysIndex].content = String(out[outSysIndex].content ?? '') + systemSuffix;
+  } else {
+    out.unshift({ role: 'system', content: systemSuffix });
+  }
+
+  return out;
+}
+
+function structuredCloneSafe(x) {
+  try {
+    return structuredClone(x);
+  } catch {
+    return JSON.parse(JSON.stringify(x));
+  }
+}
+
+/* ------------------------------ MAIN EXPORT ------------------------------ */
+
+module.exports = function registerIpcHandlers(paths) {
+  const {
+    configPath,
+    chatsPath,
+    botFilesPath,
+    botImagesPath,
+    personaPath,
+    summaryPath,
+    currentChatPath,
+    advancedPromptPath,
+    characterStatePath,
+    lorebookPath,
+  } = paths;
+
+  const cache = createCache();
+
+  /* ---- Config accessors ---- */
+
+  function loadConfig() {
+    return readJsonSafe(configPath, {});
+  }
+
+  function saveConfig(config) {
+    return writeJsonSafe(configPath, config);
+  }
+
+  /* ---- Cached getters ---- */
+
+  function getManifest(force = false) {
+    const key = 'manifest';
+    if (!force) {
+      const hit = cache.get(key);
+      if (hit) return hit;
+    }
+
+    const manifestPath = path.join(botFilesPath, 'images.json');
+    const manifest = readJsonSafe(manifestPath, {});
+    for (const k of PROVIDER_CATEGORIES) {
+      if (!manifest[k]) manifest[k] = {};
+    }
+
+    return cache.set(key, manifest);
+  }
+
+  function getFiles(category, force = false) {
+    const key = `files:${category}`;
+    if (!force) {
+      const hit = cache.get(key);
+      if (hit) return hit;
+    }
+
+    const files = listCategoryFiles({ botImagesPath, botFilesPath }, category);
+    return cache.set(key, files);
+  }
+
+  /* ------------------------------ IPC: BASIC ----------------------------- */
+
+  ipcMain.handle('get-config', () => loadConfig());
+
+  ipcMain.handle('save-api-key', (_event, provider, key, model, baseUrl) => {
+    const config = loadConfig();
+
+    config.apiKeys ??= {};
+    config.models ??= {};
+    config.baseUrls ??= {};
+
+    config.apiKeys[provider] = key;
+
+    // Only overwrite if provided (avoid deleting existing values accidentally)
+    if (model) config.models[provider] = model;
+    if (baseUrl) config.baseUrls[provider] = baseUrl;
+
+    config.activeProvider = provider;
+
+    return saveConfig(config) ? config : null;
+  });
+
+  ipcMain.handle('delete-api-key', (_event, provider) => {
+    const config = loadConfig();
+
+    if (config?.apiKeys?.[provider]) {
+      delete config.apiKeys[provider];
+      if (config.activeProvider === provider) delete config.activeProvider;
+      saveConfig(config);
+    }
+
+    return config;
+  });
+
+  ipcMain.handle('set-active-provider', (_event, provider) => {
+    const config = loadConfig();
+
+    if (config?.apiKeys?.[provider]) {
+      config.activeProvider = provider;
+      return saveConfig(config);
+    }
+    return false;
+  });
+
+  ipcMain.handle('save-persona', (_e, persona) => writeJsonSafe(personaPath, persona));
+  ipcMain.handle('get-persona', () => {
+    const p = readJsonSafe(personaPath, DEFAULT_PERSONA);
+    return p?.name ? p : DEFAULT_PERSONA;
+  });
+
+  ipcMain.handle('save-summary', (_e, summary) => writeJsonSafe(summaryPath, summary));
+  ipcMain.handle('get-summary', () => {
+    const s = readJsonSafe(summaryPath, DEFAULT_SUMMARY);
+    return s?.content != null ? s : DEFAULT_SUMMARY;
+  });
+
+  ipcMain.handle('get-lorebook', () => {
+    const l = readJsonSafe(lorebookPath, []);
+    return Array.isArray(l) ? l : [];
+  });
+  ipcMain.handle('save-lorebook', (_e, content) => writeJsonSafe(lorebookPath, content));
+
+  ipcMain.handle('get-advanced-prompt', () => readTextSafe(advancedPromptPath, ''));
+  ipcMain.handle('save-advanced-prompt', (_e, prompt) => writeTextSafe(advancedPromptPath, prompt));
+
+  ipcMain.handle('save-temperature', (_e, t) => {
+    const c = loadConfig();
+    c.temperature = Number(t);
+    return saveConfig(c);
+  });
+
+  ipcMain.handle('save-max-context', (_e, l) => {
+    const c = loadConfig();
+    c.maxContext = Number.parseInt(l, 10);
+    return saveConfig(c);
+  });
+
+  /* ------------------------------ IPC: FILES ----------------------------- */
+
+  ipcMain.handle('get-images', () => ({
+    backgrounds: getFiles('backgrounds'),
+    sprites: getFiles('sprites'),
+    splash: getFiles('splash'),
+    music: getFiles('music'),
+  }));
+
+  ipcMain.handle('get-image-manifest', () => {
+    const manifest = getManifest();
+
+    // Ensure all disk files exist in manifest so UI can reference them
+    for (const category of PROVIDER_CATEGORIES) {
+      const files = getFiles(category);
+      ensureManifestCoverage(manifest, category, files);
+    }
+
+    return manifest;
+  });
+
+  ipcMain.handle('get-bot-info', () => {
+    const readBot = (rel) => readTextSafe(path.join(botFilesPath, rel), '').trim();
+
+    const charDir = path.join(botFilesPath, 'characters');
+    const characters = {};
+
+    if (fs.existsSync(charDir)) {
+      for (const entry of fs.readdirSync(charDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+
+        const p = readBot(`characters/${entry.name}/personality.txt`);
+        if (p) characters[entry.name] = p;
+      }
+    }
+
+    return {
+      personality: readBot('personality.txt'),
+      scenario: readBot('scenario.txt'),
+      initial: readBot('initial.txt'),
+      characters,
     };
-    const CACHE_TTL = 60000; // 1 minute cache
+  });
 
-    // --- Helper Functions ---
+  /* ------------------------------ IPC: CHATS ----------------------------- */
 
-    function loadConfig() {
-        try {
-            if (fs.existsSync(configPath)) {
-                return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            }
-        } catch (e) {
-            console.error("Error loading config:", e);
-        }
-        return { apiKeys: {}, models: {}, baseUrls: {} };
-    }
-
-    function saveConfig(config) {
-        try {
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving config:", e);
-            return false;
-        }
-    }
-
-    function loadCharacterState() {
-        try {
-            if (fs.existsSync(characterStatePath)) {
-                return JSON.parse(fs.readFileSync(characterStatePath, 'utf8'));
-            }
-        } catch (e) { console.error("Error loading character state:", e); }
-        return {};
-    }
-
-    function loadLorebook() {
-        try {
-            if (fs.existsSync(lorebookPath)) {
-                return JSON.parse(fs.readFileSync(lorebookPath, 'utf8'));
-            }
-        } catch (e) { console.error("Error loading lorebook:", e); }
-        return [];
-    }
-
-    const scanDirectoryRecursively = (dir, prefix = '') => {
-        let results = [];
-        if (!fs.existsSync(dir)) return results;
-        
-        try {
-            const items = fs.readdirSync(dir, { withFileTypes: true });
-            for (const item of items) {
-                if (item.isDirectory()) {
-                    results = results.concat(scanDirectoryRecursively(path.join(dir, item.name), `${prefix}${item.name}/`));
-                } else if (/\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i.test(item.name)) {
-                    results.push(prefix + item.name);
-                }
-            }
-        } catch (e) {
-            console.error(`Error scanning directory ${dir}:`, e);
-        }
-        return results;
+  ipcMain.handle('save-chat', (_event, name, messages) => {
+    const safeName = sanitizeFilename(name);
+    const payload = {
+      messages,
+      characterState: readJsonSafe(characterStatePath, {}),
+      lorebook: readJsonSafe(lorebookPath, []),
+      timestamp: Date.now(),
     };
+    return writeJsonSafe(path.join(chatsPath, `${safeName}.json`), payload);
+  });
 
-    const getFiles = (subdir, forceRefresh = false) => {
-        const now = Date.now();
-        if (!forceRefresh && fileCache.data[subdir] && (now - fileCache.timestamp < CACHE_TTL)) {
-            return fileCache.data[subdir];
-        }
+  ipcMain.handle('get-chats', () => {
+    try {
+      return fs.readdirSync(chatsPath)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
+    } catch {
+      return [];
+    }
+  });
 
-        try {
-            const dir = path.join(botImagesPath, subdir);
-            let results = [];
+  ipcMain.handle('load-chat', (_event, name) => {
+    const data = readJsonSafe(path.join(chatsPath, `${name}.json`), null);
 
-            if (subdir === 'sprites') {
-                results = results.concat(scanDirectoryRecursively(path.join(botImagesPath, 'sprites'), 'sprites/'));
-                results = results.concat(scanDirectoryRecursively(path.join(botFilesPath, 'characters'), 'characters/'));
-            } else if (fs.existsSync(dir)) {
-                results = fs.readdirSync(dir).filter(f => /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i.test(f))
-                    .map(f => `${subdir}/${f}`);
-            }
+    // New format
+    if (data && data.messages) {
+      if (data.characterState) writeJsonSafe(characterStatePath, data.characterState);
+      if (data.lorebook) writeJsonSafe(lorebookPath, data.lorebook);
+      return data.messages;
+    }
 
-            fileCache.data[subdir] = results;
-            fileCache.timestamp = now;
-            return results;
-        } catch (e) { return []; }
-    };
+    // Legacy format: raw array of messages
+    return Array.isArray(data) ? data : [];
+  });
 
-    // --- IPC Handlers ---
+  ipcMain.handle('save-current-chat', (_e, d) => writeJsonSafe(currentChatPath, d));
+  ipcMain.handle('load-current-chat', () => readJsonSafe(currentChatPath, {}));
 
-    ipcMain.handle('get-config', () => {
-        return loadConfig();
-    });
+  /* ------------------------------ IPC: AI ------------------------------- */
 
-    ipcMain.handle('save-api-key', (event, provider, key, model, baseUrl) => {
-        const config = loadConfig();
-        if (!config.apiKeys) config.apiKeys = {};
-        if (!config.models) config.models = {};
-        if (!config.baseUrls) config.baseUrls = {};
-        
-        config.apiKeys[provider] = key;
-        if (model) config.models[provider] = model;
-        if (baseUrl) config.baseUrls[provider] = baseUrl;
-        
-        if (!config.activeProvider) config.activeProvider = provider;
+  ipcMain.handle('test-provider', async () => aiService.testConnection(loadConfig()));
 
-        saveConfig(config);
-        return config;
-    });
+  /**
+   * Character state evolution:
+   * - Feeds recent messages + current state + original personalities
+   * - Expects JSON only; merges into state file
+   * - Extracts NewLore objects into lorebook array
+   */
+  ipcMain.handle('evolve-character-state', async (_event, messages, activeCharacters) => {
+    if (!Array.isArray(activeCharacters) || activeCharacters.length === 0) return null;
 
-    ipcMain.handle('delete-api-key', (event, provider) => {
-        const config = loadConfig();
-        if (config.apiKeys && config.apiKeys[provider]) {
-            delete config.apiKeys[provider];
-            if (config.activeProvider === provider) {
-                delete config.activeProvider;
-            }
-            saveConfig(config);
-        }
-        return config;
-    });
+    const config = loadConfig();
 
-    ipcMain.handle('set-active-provider', (event, provider) => {
-        const config = loadConfig();
-        if (config.apiKeys && config.apiKeys[provider]) {
-            config.activeProvider = provider;
-            saveConfig(config);
-            return true;
-        }
-        return false;
-    });
+    // Include a small slice of original personality for grounding
+    let originalPersonalities = '';
+    for (const name of activeCharacters) {
+      const charPath = path.join(botFilesPath, 'characters', name, 'personality.txt');
+      if (fs.existsSync(charPath)) {
+        const text = readTextSafe(charPath, '').slice(0, 1000);
+        originalPersonalities += `\n[${name}'s ORIGINAL CORE PERSONALITY]\n${text}...`;
+      }
+    }
 
-    ipcMain.handle('save-persona', (event, persona) => {
-        try {
-            fs.writeFileSync(personaPath, JSON.stringify(persona, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving persona:", e);
-            return false;
-        }
-    });
+    const currentState = readJsonSafe(characterStatePath, {});
+    const recentHistory = (messages ?? [])
+      .slice(-5)
+      .map(m => `${m.role}: ${String(m.content ?? '')}`)
+      .join('\n');
 
-    ipcMain.handle('get-persona', () => {
-        try {
-            if (fs.existsSync(personaPath)) {
-                return JSON.parse(fs.readFileSync(personaPath, 'utf8'));
-            }
-        } catch (e) {
-            console.error("Error loading persona:", e);
-        }
-        return { name: 'Jim', details: '' };
-    });
+    const systemPrompt =
+      'You are a narrative engine. Update the internal psychological state of the characters based on the recent conversation. Output JSON only.';
 
-    ipcMain.handle('save-summary', (event, summary) => {
-        try {
-            fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving summary:", e);
-            return false;
-        }
-    });
-
-    ipcMain.handle('get-summary', () => {
-        try {
-            if (fs.existsSync(summaryPath)) {
-                return JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
-            }
-        } catch (e) {
-            console.error("Error loading summary:", e);
-        }
-        return { content: '' };
-    });
-
-    ipcMain.handle('get-lorebook', () => {
-        return loadLorebook();
-    });
-
-    ipcMain.handle('save-lorebook', (event, content) => {
-        try {
-            fs.writeFileSync(lorebookPath, JSON.stringify(content, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving lorebook:", e);
-            return false;
-        }
-    });
-
-    ipcMain.handle('get-advanced-prompt', () => {
-        try {
-            if (fs.existsSync(advancedPromptPath)) {
-                return fs.readFileSync(advancedPromptPath, 'utf8');
-            }
-        } catch (e) {
-            console.error("Error loading advanced prompt:", e);
-        }
-        return '';
-    });
-
-    ipcMain.handle('save-temperature', (event, temperature) => {
-        const config = loadConfig();
-        config.temperature = parseFloat(temperature);
-        saveConfig(config);
-        return true;
-    });
-
-    ipcMain.handle('save-max-context', (event, limit) => {
-        const config = loadConfig();
-        config.maxContext = parseInt(limit);
-        saveConfig(config);
-        return true;
-    });
-
-    ipcMain.handle('save-advanced-prompt', (event, prompt) => {
-        try {
-            fs.writeFileSync(advancedPromptPath, prompt);
-            return true;
-        } catch (e) {
-            console.error("Error saving advanced prompt:", e);
-            return false;
-        }
-    });
-
-    ipcMain.handle('evolve-character-state', async (event, messages, activeCharacters) => {
-        const config = loadConfig();
-        const provider = config.activeProvider || Object.keys(config.apiKeys)[0];
-        const apiKey = config.apiKeys ? config.apiKeys[provider] : null;
-        const savedModel = config.models ? config.models[provider] : null;
-        const savedBaseUrl = (config.baseUrls && config.baseUrls[provider]) ? config.baseUrls[provider] : null;
-
-        if ((!apiKey && provider !== 'local') || !activeCharacters || activeCharacters.length === 0) return null;
-
-        let originalPersonalities = "";
-        activeCharacters.forEach(name => {
-            const charPath = path.join(botFilesPath, 'characters', name, 'personality.txt');
-            if (fs.existsSync(charPath)) {
-                 originalPersonalities += `\n[${name}'s ORIGINAL CORE PERSONALITY]\n${fs.readFileSync(charPath, 'utf8').slice(0, 1000)}...`;
-            }
-        });
-
-        const currentState = loadCharacterState();
-        const currentLore = loadLorebook();
-        const recentHistory = messages.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n');
-
-        const systemPrompt = "You are a narrative engine. Update the internal psychological state of the characters based on the recent conversation. Output JSON only.";
-        const userPrompt = `
-[CONTEXT]
+    const userPrompt =
+`[CONTEXT]
 ${originalPersonalities}
-
 [CURRENT STATE]
 ${JSON.stringify(currentState, null, 2)}
-
 [RECENT INTERACTION]
 ${recentHistory}
-
 [INSTRUCTIONS]
 Analyze the recent interaction.
 Update the state for: ${activeCharacters.join(', ')}.
@@ -284,730 +718,188 @@ Fields to update:
 - Trust: Level of trust in the user.
 - Thoughts: Internal monologue or current goal.
 - NewLore: If a NEW significant fact about the world or characters is established that should be remembered long-term, output an object { "keywords": ["key1", "key2"], "scenario": "Fact description" }. Otherwise null.
+Output a JSON object keyed by character name containing these fields.`;
 
-Output a JSON object keyed by character name containing these fields.
-`;
+    try {
+      const responseText = await aiService.generateCompletion(config, [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ]);
 
-        try {
-            let responseText = "";
-            if (provider === 'gemini') {
-                const modelName = savedModel || 'gemini-1.5-flash';
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-                const r = await axios.post(url, {
-                    contents: [{ parts: [{ text: userPrompt }] }],
-                    systemInstruction: { parts: [{ text: systemPrompt }] }
-                });
-                if (r.data.candidates && r.data.candidates.length > 0) {
-                    responseText = r.data.candidates[0].content.parts[0].text;
-                }
-            } else {
-                let baseURL = 'https://api.openai.com/v1';
-                let model = savedModel || 'gpt-3.5-turbo';
-                if (provider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
-                if (provider === 'local') {
-                    baseURL = savedBaseUrl || 'http://localhost:1234/v1';
-                    if (!savedModel) model = 'local-model';
-                }
-                // ... Add other providers as needed ...
+      if (!responseText) return null;
 
-                const r = await axios.post(`${baseURL}/chat/completions`, {
-                    model: model,
-                    messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-                    temperature: 0.5
-                }, { headers: { 'Authorization': `Bearer ${apiKey}` } });
-                responseText = r.data.choices[0].message.content;
+      // Extract the first JSON object block (defensive)
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+
+      const updates = JSON.parse(jsonMatch[0]);
+
+      // Pull NewLore out into lorebook
+      const currentLore = readJsonSafe(lorebookPath, []);
+      const loreArray = Array.isArray(currentLore) ? currentLore : [];
+
+      for (const update of Object.values(updates)) {
+        if (update?.NewLore?.scenario && update?.NewLore?.keywords) {
+          loreArray.push(update.NewLore);
+          delete update.NewLore;
+        }
+      }
+
+      writeJsonSafe(lorebookPath, loreArray);
+
+      const merged = { ...currentState, ...updates };
+      writeJsonSafe(characterStatePath, merged);
+      return merged;
+    } catch (e) {
+      console.error('Evolution failed:', e);
+      return null;
+    }
+  });
+
+  /**
+   * Scan images and auto-label them via vision.
+   * Updates botFilesPath/images.json manifest.
+   */
+  ipcMain.handle('scan-images', async () => {
+    const config = loadConfig();
+    const settings = aiService.getProviderSettings(config);
+
+    if (!settings.apiKey && settings.provider !== 'local') {
+      return { success: false, message: 'No API key found.' };
+    }
+
+    const manifestPath = path.join(botFilesPath, 'images.json');
+    const manifest = readJsonSafe(manifestPath, {});
+    for (const k of PROVIDER_CATEGORIES) if (!manifest[k]) manifest[k] = {};
+
+    let updated = false;
+
+    const BATCH_SIZE = 3;
+
+    async function processCategory(category) {
+      const files = listCategoryFiles({ botImagesPath, botFilesPath }, category);
+      const toProcess = files.filter(f => !manifest[category][f]);
+
+      for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
+        const batch = toProcess.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(batch.map(async (rel) => {
+          console.log(`[Image Scan] Analyzing: ${rel}`);
+
+          try {
+            const abs = resolveMediaAbsolutePath({ botImagesPath, botFilesPath }, rel);
+            const buffer = await fs.promises.readFile(abs);
+            const mimeType = getMimeType(abs);
+
+            if (mimeType.startsWith('audio/')) {
+              manifest[category][rel] = 'Audio file';
+              updated = true;
+              return;
             }
 
-            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const newStateUpdates = JSON.parse(jsonMatch[0]);
-                
-                // Handle Dynamic Lorebook Updates
-                Object.values(newStateUpdates).forEach(update => {
-                    if (update.NewLore && update.NewLore.scenario && update.NewLore.keywords) {
-                        currentLore.push(update.NewLore);
-                        delete update.NewLore; // Remove from character state so it doesn't clutter
-                    }
-                });
-                fs.writeFileSync(lorebookPath, JSON.stringify(currentLore, null, 2));
+            // Vision prompt: short VN-friendly label
+            const result = await aiService.generateCompletion(
+              config,
+              [{
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'Describe this image in 5 words or less for a visual novel script.' },
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${buffer.toString('base64')}` } },
+                ],
+              }],
+              { max_tokens: 50 }
+            );
 
-                // Save Character State
-                const mergedState = { ...currentState, ...newStateUpdates };
-                fs.writeFileSync(characterStatePath, JSON.stringify(mergedState, null, 2));
-                return mergedState;
+            if (result) {
+              manifest[category][rel] = result.trim();
+              updated = true;
             }
-        } catch (e) { console.error("Evolution failed:", e); }
-        return null;
+          } catch (e) {
+            console.error(`[Image Scan] Error ${rel}:`, e?.message ?? e);
+          }
+        }));
+      }
+    }
+
+    for (const category of PROVIDER_CATEGORIES) {
+      await processCategory(category);
+    }
+
+    if (updated) {
+      writeJsonSafe(manifestPath, manifest);
+      cache.invalidate(); // files + manifest might change
+      return { success: true, message: 'Manifest updated.' };
+    }
+
+    return { success: true, message: 'No new images found.' };
+  });
+
+  /**
+   * Main chat send:
+   * - Builds VN visual prompt
+   * - Injects enforcement + state + lore + advanced prompt
+   * - Trims to max context
+   * - Streams chunks back to renderer via IPC
+   */
+  ipcMain.handle('send-chat', async (event, messages, options = {}) => {
+    const messagesCopy = structuredCloneSafe(messages ?? []);
+    const config = loadConfig();
+    const settings = aiService.getProviderSettings(config);
+
+    if (!settings.apiKey && settings.provider !== 'local') {
+      return 'Error: No API key found.';
+    }
+
+    const manifest = getManifest();
+
+    // Ensure manifest covers disk files so prompt listing doesn’t miss entries
+    for (const category of PROVIDER_CATEGORIES) {
+      ensureManifestCoverage(manifest, category, getFiles(category));
+    }
+
+    // Extract recent text for relevance filtering
+    const recentText = messagesCopy.slice(-3).map(m => m.content || '').join(' ');
+
+    // Pass recentText to filter assets
+    const visualPrompt = buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, recentText);
+
+    const characterState = readJsonSafe(characterStatePath, {});
+    const lorebook = readJsonSafe(lorebookPath, []);
+
+    const stateInjection = buildStateInjection(characterState, options?.activeCharacters);
+    const loreInjection = buildLoreInjection(lorebook, messagesCopy);
+
+    const advancedPromptContent = readTextSafe(advancedPromptPath, '').trim();
+
+    const enforcementRules = buildEnforcementRules({
+      stateInjection,
+      loreInjection,
+      advancedPromptContent,
     });
 
-    ipcMain.handle('get-images', () => {
-        return {
-            backgrounds: getFiles('backgrounds'),
-            sprites: getFiles('sprites'),
-            splash: getFiles('splash'),
-            music: getFiles('music')
-        };
-    });
-
-    ipcMain.handle('get-image-manifest', () => {
-        let manifest = { backgrounds: {}, sprites: {}, splash: {}, music: {} };
-        
-        try {
-            const manifestPath = path.join(botFilesPath, 'images.json');
-            if (fs.existsSync(manifestPath)) {
-                manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            }
-        } catch (e) { console.error("Error reading manifest:", e); }
-        
-        if (!manifest.backgrounds) manifest.backgrounds = {};
-        if (!manifest.sprites) manifest.sprites = {};
-        if (!manifest.splash) manifest.splash = {};
-        if (!manifest.music) manifest.music = {};
-
-        const validate = (category) => {
-            try {
-                const dir = path.join(botImagesPath, category);
-                if (!fs.existsSync(dir)) return;
-                
-                Object.keys(manifest[category]).forEach(file => {
-                    const filePath = path.join(botFilesPath, file);
-                    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-                        delete manifest[category][file];
-                    }
-                });
-            } catch (e) { console.error(`Error validating ${category}:`, e); }
-        };
-        validate('backgrounds');
-        validate('sprites');
-        validate('splash');
-        validate('music');
-
-        const populate = (subdir, category) => {
-            try {
-                const dir = path.join(botImagesPath, subdir);
-                if (fs.existsSync(dir) || category === 'sprites') {
-                    const scanDir = (d, prefix = '') => {
-                        if (!fs.existsSync(d)) return;
-                        const items = fs.readdirSync(d, { withFileTypes: true });
-                        items.forEach(item => {
-                            if (item.isDirectory()) {
-                                scanDir(path.join(d, item.name), `${prefix}${item.name}/`);
-                            } else if (/\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i.test(item.name)) {
-                                const key = prefix + item.name;
-                                if (!manifest[category][key]) {
-                                    manifest[category][key] = key;
-                                }
-                            }
-                        });
-                    };
-                    if (category === 'sprites') {
-                        scanDir(path.join(botImagesPath, 'sprites'), 'sprites/');
-                        if (fs.existsSync(path.join(botFilesPath, 'characters'))) {
-                            scanDir(path.join(botFilesPath, 'characters'), 'characters/');
-                        }
-                    } else {
-                        scanDir(dir, `${subdir}/`);
-                    }
-                }
-            } catch (e) { console.error(`Error scanning ${subdir}:`, e); }
-        };
-
-        populate('backgrounds', 'backgrounds');
-        populate('sprites', 'sprites');
-        populate('splash', 'splash');
-        populate('music', 'music');
-
-        return manifest;
-    });
-
-    ipcMain.handle('get-bot-info', () => {
-        const read = (filename) => {
-            try {
-                return fs.readFileSync(path.join(botFilesPath, filename), 'utf8').trim();
-            } catch (e) {
-                console.error(`Failed to read ${filename}:`, e.message);
-                return '';
-            }
-        };
-
-        let personality = read('personality.txt');
-        let characters = {};
-
-        const charDir = path.join(botFilesPath, 'characters');
-        if (fs.existsSync(charDir)) {
-            try {
-                const chars = fs.readdirSync(charDir, { withFileTypes: true });
-                for (const char of chars) {
-                    if (char.isDirectory()) {
-                        const charPPath = path.join(charDir, char.name, 'personality.txt');
-                        if (fs.existsSync(charPPath)) {
-                            const charP = fs.readFileSync(charPPath, 'utf8').trim();
-                            if (charP) {
-                                characters[char.name] = charP;
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error("Error reading characters directory:", e);
-            }
-        }
-
-        let scenario = read('scenario.txt');
-
-        return {
-            personality: personality,
-            scenario: scenario,
-            initial: read('initial.txt'),
-            characters: characters || {}
-        };
-    });
-
-    ipcMain.handle('save-chat', (event, name, messages) => {
-        try {
-            // Bundle current state with the chat for branching
-            const saveData = {
-                messages: messages,
-                characterState: loadCharacterState(),
-                lorebook: loadLorebook(),
-                timestamp: Date.now()
-            };
-            
-            const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-            fs.writeFileSync(path.join(chatsPath, `${safeName}.json`), JSON.stringify(saveData, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving chat:", e);
-            return false;
-        }
-    });
-
-    ipcMain.handle('get-chats', () => {
-        try {
-            return fs.readdirSync(chatsPath).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
-        } catch (e) {
-            return [];
-        }
-    });
-
-    ipcMain.handle('load-chat', (event, name) => {
-        try {
-            const data = JSON.parse(fs.readFileSync(path.join(chatsPath, `${name}.json`), 'utf8'));
-            
-            // Handle new format (Object) vs old format (Array)
-            if (!Array.isArray(data) && data.messages) {
-                // Restore the state associated with this save slot (Branching)
-                if (data.characterState) fs.writeFileSync(characterStatePath, JSON.stringify(data.characterState, null, 2));
-                if (data.lorebook) fs.writeFileSync(lorebookPath, JSON.stringify(data.lorebook, null, 2));
-                return data.messages;
-            }
-            
-            return data; // Fallback for old saves
-        } catch (e) {
-            return [];
-        }
-    });
-
-    ipcMain.handle('save-current-chat', (event, data) => {
-        try {
-            fs.writeFileSync(currentChatPath, JSON.stringify(data, null, 2));
-            return true;
-        } catch (e) {
-            console.error("Error saving current chat:", e);
-            return false;
-        }
-    });
-
-    ipcMain.handle('load-current-chat', () => {
-        try {
-            if (fs.existsSync(currentChatPath)) {
-                return JSON.parse(fs.readFileSync(currentChatPath, 'utf8'));
-            }
-        } catch (e) {
-            console.error("Error loading current chat:", e);
-        }
-        return null;
-    });
-
-    ipcMain.handle('test-provider', async () => {
-        const config = loadConfig();
-        const provider = config.activeProvider;
-        if (!provider) return { success: false, message: "No active provider selected." };
-        
-        const apiKey = (config.apiKeys && config.apiKeys[provider]) ? config.apiKeys[provider] : null;
-        if (!apiKey && provider !== 'local') return { success: false, message: `No API key found for ${provider}.` };
-
-        const savedModel = config.models ? config.models[provider] : null;
-        const savedBaseUrl = (config.baseUrls && config.baseUrls[provider]) ? config.baseUrls[provider] : null;
-
-        try {
-            if (provider === 'gemini') {
-                const modelName = savedModel || 'gemini-1.5-flash';
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-                await axios.post(url, {
-                    contents: [{ parts: [{ text: "Hello" }] }]
-                });
-            } else {
-                let baseURL = 'https://api.openai.com/v1';
-                let model = savedModel || 'gpt-3.5-turbo';
-
-                if (provider === 'openrouter') {
-                    baseURL = 'https://openrouter.ai/api/v1';
-                    if (!savedModel) model = 'mistralai/mistral-7b-instruct:free';
-                } else if (provider === 'grok') {
-                    baseURL = 'https://api.x.ai/v1';
-                    if (!savedModel) model = 'grok-beta';
-                } else if (provider === 'chutes') {
-                    baseURL = 'https://chutes.ai/api/v1';
-                    if (!savedModel) model = 'chutes-model';
-                } else if (provider === 'featherless') {
-                    baseURL = 'https://api.featherless.ai/v1';
-                    if (!savedModel) model = 'meta-llama/Meta-Llama-3-8B-Instruct';
-                } else if (provider === 'local') {
-                    baseURL = savedBaseUrl || 'http://localhost:1234/v1';
-                    if (!savedModel) model = 'local-model';
-                }
-
-                await axios.post(`${baseURL}/chat/completions`, {
-                    model: model,
-                    messages: [{ role: "user", content: "Hello" }],
-                    max_tokens: 1
-                }, { headers: { 'Authorization': `Bearer ${apiKey}` } });
-            }
-            return { success: true, message: `Successfully connected to ${provider}!` };
-        } catch (error) {
-            console.error("Test Provider Error:", error);
-            const msg = error.response ? JSON.stringify(error.response.data) : error.message;
-            return { success: false, message: `Connection failed: ${msg}` };
-        }
-    });
-
-    ipcMain.handle('scan-images', async () => {
-        const config = loadConfig();
-        const provider = config.activeProvider || Object.keys(config.apiKeys)[0];
-        const apiKey = config.apiKeys ? config.apiKeys[provider] : null;
-        const savedModel = config.models ? config.models[provider] : null;
-        const savedBaseUrl = (config.baseUrls && config.baseUrls[provider]) ? config.baseUrls[provider] : null;
-
-        if (!apiKey && provider !== 'local') return { success: false, message: "No API key found." };
-
-        const manifestPath = path.join(botFilesPath, 'images.json');
-        let manifest = { backgrounds: {}, sprites: {} };
-        
-        if (fs.existsSync(manifestPath)) {
-            try {
-                manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            } catch (e) { console.error("Error parsing manifest", e); }
-        }
-        if (!manifest.backgrounds) manifest.backgrounds = {};
-        if (!manifest.sprites) manifest.sprites = {};
-        if (!manifest.splash) manifest.splash = {};
-        if (!manifest.music) manifest.music = {};
-
-        let updated = false;
-
-        const getMimeType = (filePath) => {
-            const ext = path.extname(filePath).toLowerCase();
-            if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
-            if (ext === '.webp') return 'image/webp';
-            if (ext === '.gif') return 'image/gif';
-            if (ext === '.mp3') return 'audio/mpeg';
-            if (ext === '.wav') return 'audio/wav';
-            if (ext === '.ogg') return 'audio/ogg';
-            return 'image/png';
-        };
-
-        const processCategory = async (category) => {
-            const dir = path.join(botImagesPath, category);
-            
-            let files = [];
-            if (category === 'sprites') {
-                files = files.concat(scanDirectoryRecursively(path.join(botImagesPath, 'sprites'), 'sprites/'));
-                files = files.concat(scanDirectoryRecursively(path.join(botFilesPath, 'characters'), 'characters/'));
-            } else {
-                files = scanDirectoryRecursively(dir, `${category}/`);
-            }
-            
-            for (const file of files) {
-                if (manifest[category][file]) continue;
-
-                console.log(`[Image Scan] Analyzing: ${category}/${file}`);
-                const filePath = path.join(botFilesPath, file);
-                const base64 = fs.readFileSync(filePath).toString('base64');
-                const mimeType = getMimeType(filePath);
-                
-                if (mimeType.startsWith('audio/')) {
-                    manifest[category][file] = "Audio file";
-                    updated = true;
-                    continue;
-                }
-
-                let description = file;
-
-                try {
-                    if (provider === 'gemini') {
-                        const modelName = savedModel || 'gemini-1.5-flash';
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-                        const response = await axios.post(url, {
-                            contents: [{
-                                parts: [
-                                    { text: "Describe this image in 5 words or less for a visual novel script." },
-                                    { inlineData: { mimeType: mimeType, data: base64 } }
-                                ]
-                            }]
-                        });
-                        if (response.data.candidates && response.data.candidates.length > 0) {
-                            description = response.data.candidates[0].content.parts[0].text.trim();
-                        }
-                    } else {
-                        let baseURL = 'https://api.openai.com/v1';
-                        let model = savedModel || 'gpt-4-turbo';
-                        if (provider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
-                        if (provider === 'featherless') baseURL = 'https://api.featherless.ai/v1';
-                        if (provider === 'local') {
-                            baseURL = savedBaseUrl || 'http://localhost:1234/v1';
-                            if (!savedModel) model = 'local-model';
-                        }
-
-                        const response = await axios.post(`${baseURL}/chat/completions`, {
-                            model: model,
-                            messages: [{
-                                role: "user",
-                                content: [
-                                    { type: "text", text: "Describe this image in 5 words or less for a visual novel script." },
-                                    { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
-                                ]
-                            }],
-                            max_tokens: 50
-                        }, { headers: { 'Authorization': `Bearer ${apiKey}` } });
-                        
-                        if (response.data.choices && response.data.choices.length > 0) {
-                            description = response.data.choices[0].message.content.trim();
-                        }
-                    }
-                } catch (e) {
-                    console.error(`[Image Scan] Failed to analyze ${file}:`, e.message);
-                }
-
-                manifest[category][file] = description;
-                updated = true;
-            }
-        };
-
-        await processCategory('backgrounds');
-        await processCategory('sprites');
-        await processCategory('splash');
-        await processCategory('music');
-
-        if (updated) {
-            fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-            // Invalidate cache since we just scanned and potentially found new things
-            fileCache.timestamp = 0; 
-            return { success: true, message: "Manifest updated with new images." };
-        }
-        return { success: true, message: "No new images found." };
-    });
-
-    ipcMain.handle('send-chat', async (event, messages, options = {}) => {
-        // Clone messages to prevent mutation of the incoming array
-        const messagesCopy = JSON.parse(JSON.stringify(messages));
-        
-        const config = loadConfig();
-        const provider = config.activeProvider || Object.keys(config.apiKeys)[0];
-        const apiKey = config.apiKeys ? config.apiKeys[provider] : null;
-        const savedModel = config.models ? config.models[provider] : null;
-        const savedBaseUrl = (config.baseUrls && config.baseUrls[provider]) ? config.baseUrls[provider] : null;
-        const temperature = config.temperature !== undefined ? Number(config.temperature) : 0.7;
-
-        if (!apiKey && provider !== 'local') return "Error: No API key found. Please check your options.";
-
-        const backgrounds = getFiles('backgrounds');
-        let sprites = getFiles('sprites');
-        const splashes = getFiles('splash');
-        const music = getFiles('music');
-
-        if (options.activeCharacters && Array.isArray(options.activeCharacters)) {
-            const activeSet = new Set(options.activeCharacters.map(c => c.toLowerCase()));
-            sprites = sprites.filter(file => {
-                const parts = file.split(/[/\\]/);
-                if (parts.length > 2) {
-                    const charName = parts[1].toLowerCase();
-                    return activeSet.has(charName);
-                }
-                return true;
-            });
-        }
-
-        const manifestPath = path.join(botFilesPath, 'images.json');
-        let manifest = { backgrounds: {}, sprites: {}, splash: {}, music: {} };
-        if (fs.existsSync(manifestPath)) {
-            try {
-                manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            } catch (e) {
-                console.error("Error reading images.json:", e);
-            }
-        }
-
-        const createTreeList = (files, category) => {
-            if (!files || files.length === 0) return null;
-            const tree = {};
-
-            files.forEach(file => {
-                const parts = file.split('/');
-                const filename = parts.pop();
-                const nameWithoutExt = path.parse(filename).name;
-                
-                let group = 'Common';
-                if (parts.length > 0) {
-                    if (parts[0] === 'characters' && parts.length > 1) {
-                        group = parts[1];
-                    } else if (parts[0] === 'sprites' && parts.length > 1) {
-                        group = parts[1];
-                    } else if (parts[0] === 'backgrounds' || parts[0] === 'splash' || parts[0] === 'music') {
-                        group = 'Common';
-                    } else {
-                         group = parts[parts.length - 1];
-                    }
-                }
-
-                let cleanName = nameWithoutExt;
-                if (group !== 'Common' && cleanName.toLowerCase().startsWith(group.toLowerCase())) {
-                    const potential = cleanName.substring(group.length).replace(/^[_-\s]+/, '');
-                    if (potential.length > 0) cleanName = potential;
-                }
-
-                if (!tree[group]) tree[group] = [];
-
-                let desc = manifest[category] ? manifest[category][file] : "";
-                let entry = cleanName;
-
-                if (desc) {
-                    const cleanDesc = desc.toLowerCase();
-                    const checkName = cleanName.toLowerCase();
-                    if (!cleanDesc.includes(checkName) && cleanDesc !== checkName) {
-                        entry += ` : ${desc}`;
-                    }
-                }
-                tree[group].push(entry);
-            });
-
-            let lines = [];
-            Object.keys(tree).sort().forEach(group => {
-                const items = tree[group].sort().join(', ');
-                if (group === 'Common') {
-                    lines.push(items);
-                } else {
-                    lines.push(`${group}: ${items}`);
-                }
-            });
-            return lines.join('\n');
-        };
-
-        bgList = createTreeList(backgrounds, 'backgrounds');
-        spriteList = createTreeList(sprites, 'sprites');
-        splashList = createTreeList(splashes, 'splash');
-        musicList = createTreeList(music, 'music');
-
-        let visualPrompt = "";
-        if (bgList || spriteList || splashList || musicList) {
-            visualPrompt = `\n[VISUAL NOVEL MODE]`;
-            if (bgList) visualPrompt += `\nBackgrounds:\n${bgList}`;
-            if (spriteList) visualPrompt += `\nSprites:\n${spriteList}`;
-            if (splashList) visualPrompt += `\nSplash Art:\n${splashList}`;
-            if (musicList) visualPrompt += `\nMusic:\n${musicList}`;
-
-            visualPrompt += `\n\nINSTRUCTIONS:
-1. Output visual tags ONLY at the start or end of the message. Never in the middle.
-2. [BG: "name"] changes background.
-3. [SPRITE: "Char/Name"] updates character.
-4. [SPLASH: "name"] overrides all.
-5. [MUSIC: "name"] plays background music.
-6. Max 4 characters.
-7. [HIDE: "Char"] removes character. [HIDE: "All"] removes everyone. HIDE when leaving.
-8. Sprites are STICKY. Only tag on change.`;
-        }
-
-        let advancedPromptContent = "";
-        try {
-            if (fs.existsSync(advancedPromptPath)) {
-                const content = fs.readFileSync(advancedPromptPath, 'utf8').trim();
-                if (content) advancedPromptContent = `\n\n${content}`;
-            }
-        } catch (e) { console.error("Error reading advanced prompt:", e); }
-
-        // Inject Dynamic Character State
-        const charState = loadCharacterState();
-        let stateInjection = "";
-        if (options.activeCharacters && Object.keys(charState).length > 0) {
-            stateInjection += "\n\n[CURRENT CHARACTER STATES (DYNAMIC)]";
-            options.activeCharacters.forEach(char => {
-                const key = Object.keys(charState).find(k => k.toLowerCase() === char.toLowerCase());
-                if (key && charState[key]) stateInjection += `\n${key}: ${JSON.stringify(charState[key])}`;
-            });
-        }
-
-        // Inject AURA Lorebook Entries
-        const lorebook = loadLorebook();
-        let loreInjection = "";
-        const recentText = messagesCopy.slice(-3).map(m => m.content.toLowerCase()).join(' ');
-        
-        lorebook.forEach(entry => {
-            if (entry.keywords.some(k => recentText.includes(k.toLowerCase()))) {
-                // Support 'scenario' (AURA format) or 'entry' (Legacy)
-                const text = entry.scenario || entry.entry;
-                if (text) loreInjection += `\n- ${text}`;
-            }
-        });
-        if (loreInjection) loreInjection = `\n\n[RELEVANT LORE]${loreInjection}`;
-
-        const enforcementRules = `\n\n[SYSTEM ENFORCEMENT]
-1. DO NOT speak for the user. The user's actions and dialogue are provided in the chat history. Your response must only contain the characters' reactions and dialogue.
-2. Maintain distinct personalities for each character. Do not let traits or knowledge bleed between characters defined in separate character sheets.
-3. Ensure each character's voice remains consistent with their specific definition.${stateInjection}${loreInjection}${advancedPromptContent}`;
-
-        const systemMsgIndex = messagesCopy.findIndex(m => m.role === 'system');
-        if (systemMsgIndex > -1) {
-            messagesCopy[systemMsgIndex].content += visualPrompt + enforcementRules;
-        } else {
-            messagesCopy.unshift({ role: 'system', content: visualPrompt + enforcementRules });
-        }
-        
-        const webContents = event.sender;
-
-        try {
-            if (provider === 'gemini') {
-                const modelName = savedModel || 'gemini-1.5-flash';
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?key=${apiKey}`;
-                
-                const systemMsg = messagesCopy.find(m => m.role === 'system');
-                const chatMsgs = messagesCopy.filter(m => m.role !== 'system');
-
-                const geminiContents = chatMsgs.map(m => ({
-                    role: m.role === 'user' ? 'user' : 'model',
-                    parts: [{ text: m.content }]
-                }));
-                
-                const requestBody = { 
-                    contents: geminiContents,
-                    generationConfig: { temperature: temperature }
-                };
-                if (systemMsg) {
-                    requestBody.systemInstruction = { parts: [{ text: systemMsg.content }] };
-                }
-
-                const response = await axios.post(url, requestBody, { responseType: 'stream' });
-                
-                let fullText = '';
-                let buffer = '';
-                const stream = response.data;
-
-                await new Promise((resolve, reject) => {
-                    stream.on('data', (chunk) => {
-                        buffer += chunk.toString();
-                        let braceCount = 0;
-                        let startIndex = 0;
-                        let inString = false;
-                        let escape = false;
-
-                        for (let i = 0; i < buffer.length; i++) {
-                            const char = buffer[i];
-                            if (escape) { escape = false; continue; }
-                            if (char === '\\') { escape = true; continue; }
-                            if (char === '"') { inString = !inString; continue; }
-                            
-                            if (!inString) {
-                                if (char === '{') {
-                                    if (braceCount === 0) startIndex = i;
-                                    braceCount++;
-                                } else if (char === '}') {
-                                    braceCount--;
-                                    if (braceCount === 0) {
-                                        const jsonStr = buffer.substring(startIndex, i + 1);
-                                        try {
-                                            const data = JSON.parse(jsonStr);
-                                            if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
-                                                const text = data.candidates[0].content.parts[0].text;
-                                                if (text) {
-                                                    fullText += text;
-                                                    webContents.send('chat-reply-chunk', text);
-                                                }
-                                            }
-                                        } catch (e) { /* ignore partials */ }
-                                        buffer = buffer.substring(i + 1);
-                                        i = -1;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    stream.on('end', resolve);
-                    stream.on('error', reject);
-                });
-
-                return fullText || "Error: No response from Gemini.";
-
-            } else {
-                let baseURL = 'https://api.openai.com/v1';
-                let model = savedModel || 'gpt-3.5-turbo';
-
-                if (provider === 'openrouter') {
-                    baseURL = 'https://openrouter.ai/api/v1';
-                    if (!savedModel) model = 'mistralai/mistral-7b-instruct:free';
-                } else if (provider === 'grok') {
-                    baseURL = 'https://api.x.ai/v1';
-                    if (!savedModel) model = 'grok-beta';
-                } else if (provider === 'chutes') {
-                    baseURL = 'https://chutes.ai/api/v1';
-                    if (!savedModel) model = 'chutes-model';
-                } else if (provider === 'featherless') {
-                    baseURL = 'https://api.featherless.ai/v1';
-                    if (!savedModel) model = 'meta-llama/Meta-Llama-3-8B-Instruct';
-                } else if (provider === 'local') {
-                    baseURL = savedBaseUrl || 'http://localhost:1234/v1';
-                    if (!savedModel) model = 'local-model';
-                }
-
-                const response = await axios.post(`${baseURL}/chat/completions`, {
-                    model: model,
-                    messages: messagesCopy,
-                    stream: true,
-                    temperature: temperature
-                }, { 
-                    headers: { 'Authorization': `Bearer ${apiKey}` },
-                    responseType: 'stream'
-                });
-
-                let fullText = '';
-                const stream = response.data;
-
-                await new Promise((resolve, reject) => {
-                    stream.on('data', (chunk) => {
-                        const lines = chunk.toString().split('\n');
-                        for (const line of lines) {
-                            const trimmed = line.trim();
-                            if (trimmed.startsWith('data: ')) {
-                                const dataStr = trimmed.substring(6);
-                                if (dataStr === '[DONE]') continue;
-                                try {
-                                    const data = JSON.parse(dataStr);
-                                    const content = data.choices[0].delta.content;
-                                    if (content) {
-                                        fullText += content;
-                                        webContents.send('chat-reply-chunk', content);
-                                    }
-                                } catch (e) {}
-                            }
-                        }
-                    });
-                    stream.on('end', resolve);
-                    stream.on('error', reject);
-                });
-
-                return fullText;
-            }
-        } catch (error) {
-            console.error("API Error:", error.response ? error.response.data : error.message);
-            return `Error: ${error.message}`;
-        }
-    });
+    const systemSuffix = visualPrompt + enforcementRules;
+
+    // Trim history to context budget
+    const maxContext = Number(config.maxContext) || 128000;
+    const finalMessages = applyContextWindow(messagesCopy, { maxContext, systemSuffix });
+
+    const webContents = event.sender;
+
+    try {
+      const temperature =
+        config.temperature !== undefined ? Number(config.temperature) : 0.7;
+
+      const fullText = await aiService.generateStream(
+        config,
+        finalMessages,
+        (chunk) => webContents.send('chat-reply-chunk', chunk),
+        { temperature }
+      );
+
+      return fullText || 'Error: No response from AI.';
+    } catch (error) {
+      console.error('API Error:', error?.message ?? error);
+      return `Error: ${error?.message ?? error}`;
+    }
+  });
 };

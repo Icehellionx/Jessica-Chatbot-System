@@ -1,447 +1,589 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Jessica</title>
-    <style>
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            display: flex; 
-            height: 100vh; 
-            font-family: "Segoe UI", sans-serif; 
-            background: #222; 
-            color: #eee; 
-        }
-        #vn-panel { 
-            position: relative; 
-            width: 40%; 
-            height: 100%; 
-            background: #000; 
-            overflow: hidden; 
-            flex-shrink: 0; 
-        }
-        #resizer { 
-            width: 5px; 
-            background: #444; 
-            cursor: col-resize; 
-            z-index: 100; 
-            transition: background 0.2s;
-        }
-        #resizer:hover { background: #0078d4; }
-        #main-body { 
-            flex-grow: 1; 
-            display: flex; 
-            flex-direction: column; 
-            height: 100%; 
-            background: #333; 
-            position: relative; 
-        }
-        #chat-history { 
-            flex-grow: 1; 
-            overflow-y: auto; 
-            padding: 20px; 
-            display: flex; 
-            flex-direction: column; 
-            gap: 15px; 
-        }
-        #input-area { 
-            padding: 20px; 
-            background: #2a2a2a; 
-            display: flex; 
-            gap: 10px; 
-            border-top: 1px solid #444;
-        }
-        #user-input { 
-            flex-grow: 1; 
-            padding: 12px; 
-            border-radius: 24px; 
-            border: 1px solid #555; 
-            background: #444; 
-            color: white; 
-            resize: none; 
-            height: 50px; 
-            font-family: inherit;
-        }
-        #user-input:focus { outline: 2px solid #0078d4; border-color: transparent; }
-        #send-btn { 
-            padding: 0 25px; 
-            background: #0078d4; 
-            color: white; 
-            border: none; 
-            border-radius: 24px; 
-            cursor: pointer; 
-            font-weight: bold;
-            transition: background 0.2s;
-        }
-        #send-btn:hover { background: #106ebe; }
-        
-        /* Messages */
-        .message { 
-            padding: 12px 18px; 
-            border-radius: 8px; 
-            max-width: 80%; 
-            line-height: 1.5; 
-            position: relative; 
-            word-wrap: break-word;
-        }
-        .message.user { 
-            align-self: flex-end; 
-            background: #005a9e; 
-            color: white;
-            border-bottom-right-radius: 2px;
-        }
-        .message.assistant { 
-            align-self: flex-start; 
-            background: #3b3b3b; 
-            color: #f0f0f0;
-            border-bottom-left-radius: 2px;
-        }
-        .message.system { 
-            align-self: center; 
-            background: transparent; 
-            font-size: 0.85em; 
-            color: #888; 
-            font-style: italic;
-            padding: 5px;
-        }
-        .msg-delete-btn { 
-            position: absolute; 
-            top: -8px; 
-            right: -8px; 
-            background: #d13438; 
-            color: white; 
-            border: none; 
-            border-radius: 50%; 
-            width: 20px; 
-            height: 20px; 
-            cursor: pointer; 
-            display: none; 
-            font-size: 14px; 
-            justify-content: center; 
-            align-items: center; 
-            line-height: 1;
-        }
-        .message:hover .msg-delete-btn { display: flex; }
-        
-        /* Toolbar */
-        #toolbar { 
-            padding: 10px; 
-            background: #252525; 
-            display: flex; 
-            gap: 8px; 
-            justify-content: flex-end; 
-            border-bottom: 1px solid #444;
-        }
-        .tool-btn { 
-            background: #3a3a3a; 
-            color: #ddd; 
-            border: 1px solid #555; 
-            padding: 6px 12px; 
-            border-radius: 4px; 
-            cursor: pointer; 
-            font-size: 0.9em;
-            transition: all 0.2s;
-        }
-        .tool-btn:hover { background: #4a4a4a; border-color: #777; }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jessica</title>
 
-        /* Modals */
-        .modal { 
-            position: fixed; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            background: rgba(0,0,0,0.7); 
-            z-index: 10000; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            backdrop-filter: blur(2px);
-        }
-        .modal.hidden { display: none; }
-        .modal-content { 
-            background: #2d2d2d; 
-            padding: 25px; 
-            border-radius: 8px; 
-            width: 450px; 
-            max-width: 90%; 
-            max-height: 90vh; 
-            overflow-y: auto; 
-            position: relative; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5); 
-            border: 1px solid #444;
-        }
-        .modal-content h2 { margin-top: 0; color: white; border-bottom: 1px solid #444; padding-bottom: 10px; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em; }
-        .form-group input, .form-group select, .form-group textarea { 
-            width: 100%; 
-            padding: 10px; 
-            box-sizing: border-box; 
-            background: #1f1f1f; 
-            border: 1px solid #444; 
-            color: white; 
-            border-radius: 4px; 
-        }
-        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-            outline: none; border-color: #0078d4;
-        }
-        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-        .close-btn { 
-            position: absolute; 
-            top: 15px; 
-            right: 15px; 
-            background: none; 
-            border: none; 
-            color: #aaa; 
-            font-size: 24px; 
-            cursor: pointer; 
-            line-height: 1;
-        }
-        .close-btn:hover { color: white; }
-        
-        /* Specifics */
-        #vn-bg { width: 100%; height: 100%; object-fit: cover; }
-        .key-item { 
-            background: #222; 
-            padding: 10px; 
-            margin-bottom: 8px; 
-            border-radius: 4px; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            border: 1px solid #333;
-        }
-        .typing-dots span {
-            display: inline-block; width: 6px; height: 6px; background: #ccc; border-radius: 50%; margin: 0 2px;
-            animation: typing 1.4s infinite ease-in-out both;
-        }
-        .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+  <style>
+    :root{
+      --bg: #222;
+      --panel: #333;
+      --panel-2: #2a2a2a;
+      --panel-3: #252525;
+      --border: #444;
+      --border-2:#555;
 
-        /* --- Modern Scrollbars --- */
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: #222; }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 5px; border: 2px solid #222; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
+      --text: #eee;
+      --text-dim:#ccc;
+      --text-muted:#888;
 
-        /* --- Responsive Layout (Stack vertically on small screens) --- */
-        @media (max-width: 800px) {
-            body { flex-direction: column; }
-            #vn-panel { width: 100% !important; height: 40vh; }
-            #resizer { display: none; }
-            #main-body { width: 100%; height: 60vh; }
-        }
-    </style>
+      --accent:#0078d4;
+      --accent-hover:#106ebe;
+      --danger:#d13438;
+
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-pill: 24px;
+
+      --pad-1: 10px;
+      --pad-2: 20px;
+
+      --shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      display: flex;
+      height: 100vh;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* --- Layout --- */
+    #vn-panel {
+      position: relative;
+      width: 40%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    #resizer {
+      width: 5px;
+      background: #444;
+      cursor: col-resize;
+      z-index: 100;
+      transition: background .2s;
+    }
+    #resizer:hover { background: var(--accent); }
+
+    #main-body {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: var(--panel);
+      position: relative;
+      min-width: 320px;
+    }
+
+    #chat-history {
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: var(--pad-2);
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    #input-area {
+      padding: var(--pad-2);
+      background: var(--panel-2);
+      display: flex;
+      gap: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    #user-input {
+      flex-grow: 1;
+      padding: 12px;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border-2);
+      background: #444;
+      color: white;
+      resize: none;
+      height: 50px;
+      font-family: inherit;
+    }
+    #user-input:focus {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+
+    #send-btn {
+      padding: 0 25px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      font-weight: 700;
+      transition: background .2s;
+    }
+    #send-btn:hover { background: var(--accent-hover); }
+
+    /* --- Messages --- */
+    .message{
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      max-width: 80%;
+      line-height: 1.5;
+      position: relative;
+      word-wrap: break-word;
+      white-space: pre-wrap; /* helps preserve newlines */
+    }
+    .message.user{
+      align-self: flex-end;
+      background: #005a9e;
+      color: #fff;
+      border-bottom-right-radius: 2px;
+    }
+    .message.assistant{
+      align-self: flex-start;
+      background: #3b3b3b;
+      color: #f0f0f0;
+      border-bottom-left-radius: 2px;
+    }
+    .message.system{
+      align-self: center;
+      background: transparent;
+      font-size: 0.85em;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 5px;
+    }
+
+    .msg-delete-btn{
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: var(--danger);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      display: none;
+      font-size: 14px;
+      justify-content: center;
+      align-items: center;
+      line-height: 1;
+    }
+    .message:hover .msg-delete-btn{ display: flex; }
+
+    /* --- Toolbar --- */
+    #toolbar{
+      padding: var(--pad-1);
+      background: var(--panel-3);
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      user-select: none;
+    }
+
+    .tool-btn{
+      background: #3a3a3a;
+      color: #ddd;
+      border: 1px solid #555;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: .9em;
+      transition: background .2s, border-color .2s, transform .06s;
+    }
+    .tool-btn:hover { background: #4a4a4a; border-color: #777; }
+    .tool-btn:active { transform: translateY(1px); }
+
+    .tool-btn.primary { background: var(--accent); border: none; color: #fff; }
+    .tool-btn.primary:hover { background: var(--accent-hover); }
+    .tool-btn.danger { background: var(--danger); border: none; color: #fff; }
+
+    /* --- Modals --- */
+    .modal{
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 10000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(2px);
+      padding: 16px;
+    }
+    .modal.hidden{ display: none; }
+
+    .modal-content{
+      background: #2d2d2d;
+      padding: 25px;
+      border-radius: var(--radius-md);
+      width: 450px;
+      max-width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+    }
+
+    .modal-content h2{
+      margin: 0 0 12px;
+      color: #fff;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+
+    .form-group{ margin-bottom: 15px; }
+    .form-group label{
+      display: block;
+      margin-bottom: 5px;
+      color: var(--text-dim);
+      font-size: .9em;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea{
+      width: 100%;
+      padding: 10px;
+      background: #1f1f1f;
+      border: 1px solid var(--border);
+      color: #fff;
+      border-radius: var(--radius-sm);
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus{
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .modal-footer{
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .close-btn{
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background: none;
+      border: none;
+      color: #aaa;
+      font-size: 24px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .close-btn:hover{ color: #fff; }
+
+    .divider{
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+
+    /* --- VN specifics --- */
+    #vn-bg { width: 100%; height: 100%; object-fit: cover; }
+
+    .key-item{
+      background: #222;
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid #333;
+    }
+
+    /* typing dots */
+    .typing-dots span{
+      display:inline-block;
+      width:6px; height:6px;
+      background:#ccc;
+      border-radius:50%;
+      margin:0 2px;
+      animation: typing 1.4s infinite ease-in-out both;
+    }
+    .typing-dots span:nth-child(1){ animation-delay:-0.32s; }
+    .typing-dots span:nth-child(2){ animation-delay:-0.16s; }
+    @keyframes typing {
+      0%,80%,100%{ transform:scale(0); }
+      40%{ transform:scale(1); }
+    }
+
+    /* --- Scrollbars --- */
+    ::-webkit-scrollbar{ width:10px; height:10px; }
+    ::-webkit-scrollbar-track{ background:#222; }
+    ::-webkit-scrollbar-thumb{ background:#444; border-radius:5px; border:2px solid #222; }
+    ::-webkit-scrollbar-thumb:hover{ background:#555; }
+
+    /* --- Responsive: stack on narrow screens --- */
+    @media (max-width: 800px){
+      body{ flex-direction: column; }
+      #vn-panel{ width:100% !important; height:40vh; }
+      #resizer{ display:none; }
+      #main-body{ width:100%; height:60vh; }
+    }
+  </style>
 </head>
+
 <body>
-    <div id="vn-panel">
-        <img id="vn-bg" src="" alt="">
-        <div id="vn-sprite"></div> <!-- Legacy placeholder -->
-    </div>
-    <div id="resizer"></div>
-    <div id="main-body">
-        <div id="toolbar">
-            <button id="undo-btn" class="tool-btn" title="Undo Last Turn">↶ Undo</button>
-            <button id="redo-btn" class="tool-btn" title="Regenerate Response">↻ Redo</button>
-            <button id="reset-chat-btn" class="tool-btn" title="Reset Chat">↻ Reset</button>
-            <button id="options-btn" class="tool-btn" title="Settings">⚙️ Options</button>
-        </div>
-        <div id="chat-history"></div>
-        <div id="input-area">
-            <textarea id="user-input" placeholder="Type your message... (Shift+Enter for new line)"></textarea>
-            <button id="send-btn">Send</button>
-        </div>
+  <div id="vn-panel">
+    <img id="vn-bg" src="" alt="" />
+    <div id="vn-sprite"></div><!-- legacy placeholder -->
+  </div>
+
+  <div id="resizer" aria-hidden="true"></div>
+
+  <div id="main-body">
+    <div id="toolbar" role="toolbar" aria-label="Chat toolbar">
+      <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
+      <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
+      <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
+      <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️ Options</button>
     </div>
 
-    <!-- Setup Modal -->
-    <div id="setup-modal" class="modal hidden">
-        <div class="modal-content">
-            <h2>Setup API</h2>
-            <div class="form-group">
-                <label>Provider</label>
-                <select id="setup-provider">
-                    <option value="gemini">Google Gemini</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="grok">xAI (Grok)</option>
-                    <option value="chutes">Chutes.ai</option>
-                    <option value="featherless">Featherless.ai</option>
-                    <option value="local">Local LLM (LM Studio/Ollama)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>API Key</label>
-                <input type="password" id="setup-key" placeholder="Enter API Key">
-            </div>
-            <div class="form-group">
-                <label>Model (Optional)</label>
-                <input type="text" id="setup-model" placeholder="e.g. gemini-1.5-flash">
-            </div>
-            <div class="form-group" id="setup-base-url-group" style="display:none;">
-                <label>Base URL</label>
-                <input type="text" id="setup-base-url" placeholder="e.g. http://localhost:1234/v1">
-            </div>
-            <div class="modal-footer">
-                <button id="save-setup-btn" class="tool-btn" style="background:#0078d4; border:none;">Save & Start</button>
-            </div>
-        </div>
-    </div>
+    <div id="chat-history" aria-live="polite" aria-label="Chat messages"></div>
 
-    <!-- Options Modal -->
-    <div id="options-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-options-btn" class="close-btn">×</button>
-            <h2>Options</h2>
-            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <button id="save-chat-btn" class="tool-btn">💾 Save Chat</button>
-                <button id="load-chat-btn" class="tool-btn">📂 Load Chat</button>
-                <button id="summary-btn" class="tool-btn">📝 Summary</button>
-                <button id="persona-btn" class="tool-btn">👤 Persona</button>
-                <button id="lorebook-btn" class="tool-btn">📖 Lorebook</button>
-            </div>
-            <hr style="border-color:#444; margin: 20px 0;">
-            <div class="form-group">
-                <label>Add/Update Key</label>
-                <select id="options-provider">
-                    <option value="gemini">Google Gemini</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="grok">xAI (Grok)</option>
-                    <option value="chutes">Chutes.ai</option>
-                    <option value="featherless">Featherless.ai</option>
-                    <option value="local">Local LLM (LM Studio/Ollama)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <input type="password" id="options-key" placeholder="New API Key">
-            </div>
-            <div class="form-group">
-                <input type="text" id="options-model" placeholder="Model ID (Optional)">
-            </div>
-            <div class="form-group" id="options-base-url-group" style="display:none;">
-                <input type="text" id="options-base-url" placeholder="Base URL (e.g. http://localhost:1234/v1)">
-            </div>
-            <div class="form-group" style="display:flex; gap:10px;">
-                <button id="update-key-btn" class="tool-btn" style="flex:1;">Update Key</button>
-                <button id="test-provider-btn" class="tool-btn" style="flex:1;">Test Connection</button>
-            </div>
-            <hr style="border-color:#444; margin: 20px 0;">
-            <h3 style="margin-top:0;">Saved Keys</h3>
-            <div id="keys-list"></div>
-            <hr style="border-color:#444; margin: 20px 0;">
-            <div class="form-group">
-                <button id="scan-images-btn" class="tool-btn" style="width:100%;">Rescan Images</button>
-            </div>
-            <hr style="border-color:#444; margin: 20px 0;">
-            <h3 style="margin-top:0;">Token Usage (Estimate)</h3>
-            <div class="form-group">
-                <div style="display:flex; justify-content:space-between; color:#ccc; font-size:0.9em; margin-bottom:5px;">
-                    <span id="token-usage-text">0 / 128000</span>
-                    <span id="token-percentage">0%</span>
-                </div>
-                <div style="background:#444; height:10px; border-radius:5px; overflow:hidden;">
-                    <div id="token-bar" style="background:#0078d4; height:100%; width:0%; transition: width 0.3s;"></div>
-                </div>
-            </div>
-            <hr style="border-color:#444; margin: 20px 0;">
-            <h3 style="margin-top:0;">Advanced Settings</h3>
-            <div class="form-group">
-                <label style="display:flex; justify-content:space-between; color:#ccc; font-size:0.9em; margin-bottom:5px;">
-                    <span>Temperature (Creativity)</span>
-                    <span id="temp-display">0.7</span>
-                </label>
-                <input type="range" id="advanced-temperature" min="0" max="2" step="0.1" value="0.7" style="width:100%; cursor:pointer;">
-            </div>
-            <div class="form-group">
-                <label>Max Context Limit</label>
-                <input type="number" id="max-context" placeholder="e.g. 8192, 32000, 128000">
-            </div>
-            <div class="form-group">
-                <textarea id="advanced-prompt-content" rows="6" placeholder="Enter custom system instructions..."></textarea>
-            </div>
-            <div class="form-group">
-                <button id="save-advanced-prompt-btn" class="tool-btn" style="width:100%; background:#0078d4; border:none;">Save Advanced Settings</button>
-            </div>
-        </div>
+    <div id="input-area">
+      <textarea
+        id="user-input"
+        placeholder="Type your message... (Shift+Enter for new line)"
+        aria-label="Message input"
+      ></textarea>
+      <button id="send-btn" type="button">Send</button>
     </div>
+  </div>
 
-    <!-- Persona Modal -->
-    <div id="persona-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-persona-btn" class="close-btn">×</button>
-            <h2>User Persona</h2>
-            <div class="form-group">
-                <label>Name</label>
-                <input type="text" id="persona-name">
-            </div>
-            <div class="form-group">
-                <label>Details / Appearance</label>
-                <textarea id="persona-details" rows="5" placeholder="Describe yourself for the AI..."></textarea>
-            </div>
-            <div class="modal-footer">
-                <button id="save-persona-btn" class="tool-btn" style="background:#0078d4; border:none;">Save</button>
-            </div>
-        </div>
+  <!-- Setup Modal -->
+  <div id="setup-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+    <div class="modal-content">
+      <h2 id="setup-title">Setup API</h2>
+
+      <div class="form-group">
+        <label for="setup-provider">Provider</label>
+        <select id="setup-provider">
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="grok">xAI (Grok)</option>
+          <option value="chutes">Chutes.ai</option>
+          <option value="featherless">Featherless.ai</option>
+          <option value="local">Local LLM (LM Studio/Ollama)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="setup-key">API Key</label>
+        <input type="password" id="setup-key" placeholder="Enter API Key" autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <label for="setup-model">Model (Optional)</label>
+        <input type="text" id="setup-model" placeholder="e.g. gemini-1.5-flash" />
+      </div>
+
+      <div class="form-group" id="setup-base-url-group" style="display:none;">
+        <label for="setup-base-url">Base URL</label>
+        <input type="text" id="setup-base-url" placeholder="e.g. http://localhost:1234/v1" />
+      </div>
+
+      <div class="modal-footer">
+        <button id="save-setup-btn" type="button" class="tool-btn primary">Save &amp; Start</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Summary Modal -->
-    <div id="summary-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-summary-btn" class="close-btn">×</button>
-            <h2>Story Summary</h2>
-            <p style="font-size:0.8em; color:#aaa; margin-top:-10px;">This is auto-generated to help the AI remember long conversations.</p>
-            <div class="form-group">
-                <textarea id="summary-content" rows="10"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button id="save-summary-btn" class="tool-btn" style="background:#0078d4; border:none;">Save</button>
-            </div>
+  <!-- Options Modal -->
+  <div id="options-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="options-title">
+    <div class="modal-content">
+      <button id="close-options-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="options-title">Options</h2>
+
+      <div class="form-group" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <button id="save-chat-btn" class="tool-btn" type="button">💾 Save Chat</button>
+        <button id="load-chat-btn" class="tool-btn" type="button">📂 Load Chat</button>
+        <button id="summary-btn" class="tool-btn" type="button">📝 Summary</button>
+        <button id="persona-btn" class="tool-btn" type="button">👤 Persona</button>
+        <button id="lorebook-btn" class="tool-btn" type="button">📖 Lorebook</button>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="form-group">
+        <label for="options-provider">Add/Update Key</label>
+        <select id="options-provider">
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="grok">xAI (Grok)</option>
+          <option value="chutes">Chutes.ai</option>
+          <option value="featherless">Featherless.ai</option>
+          <option value="local">Local LLM (LM Studio/Ollama)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <input type="password" id="options-key" placeholder="New API Key" autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <input type="text" id="options-model" placeholder="Model ID (Optional)" />
+      </div>
+
+      <div class="form-group" id="options-base-url-group" style="display:none;">
+        <input type="text" id="options-base-url" placeholder="Base URL (e.g. http://localhost:1234/v1)" />
+      </div>
+
+      <div class="form-group" style="display:flex; gap:10px;">
+        <button id="update-key-btn" class="tool-btn" type="button" style="flex:1;">Update Key</button>
+        <button id="test-provider-btn" class="tool-btn" type="button" style="flex:1;">Test Connection</button>
+      </div>
+
+      <hr class="divider" />
+
+      <h3 style="margin-top:0;">Saved Keys</h3>
+      <div id="keys-list"></div>
+
+      <hr class="divider" />
+
+      <div class="form-group">
+        <button id="scan-images-btn" class="tool-btn" type="button" style="width:100%;">Rescan Images</button>
+      </div>
+
+      <hr class="divider" />
+
+      <h3 style="margin-top:0;">Token Usage (Estimate)</h3>
+      <div class="form-group">
+        <div style="display:flex; justify-content:space-between; color:var(--text-dim); font-size:.9em; margin-bottom:5px;">
+          <span id="token-usage-text">0 / 128000</span>
+          <span id="token-percentage">0%</span>
         </div>
-    </div>
-
-    <!-- Lorebook Modal -->
-    <div id="lorebook-modal" class="modal hidden">
-        <div class="modal-content" style="width: 600px; max-width: 90%;">
-            <button id="close-lorebook-btn" class="close-btn">×</button>
-            <h2>Lorebook Editor</h2>
-            <p style="font-size:0.8em; color:#aaa; margin-top:-10px;">View and edit dynamic lore entries generated by the AI.</p>
-            <div class="form-group">
-                <textarea id="lorebook-content" rows="15" placeholder="[]" style="font-family: monospace; font-size: 0.9em; white-space: pre; overflow-x: auto;"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button id="save-lorebook-btn" class="tool-btn" style="background:#0078d4; border:none;">Save</button>
-            </div>
+        <div style="background:#444; height:10px; border-radius:5px; overflow:hidden;">
+          <div id="token-bar" style="background:var(--accent); height:100%; width:0%; transition: width .3s;"></div>
         </div>
-    </div>
+      </div>
 
-    <!-- Confirmation Modal -->
-    <div id="confirm-modal" class="modal hidden">
-        <div class="modal-content" style="width: 400px;">
-            <h2 id="confirm-title">Confirm</h2>
-            <p id="confirm-text" style="margin-bottom: 20px; color: #ddd;"></p>
-            <div class="modal-footer">
-                <button id="confirm-cancel-btn" class="tool-btn">Cancel</button>
-                <button id="confirm-yes-btn" class="tool-btn" style="background:#d13438; border:none;">Yes</button>
-            </div>
-        </div>
-    </div>
+      <hr class="divider" />
 
-    <!-- Load Chat Modal -->
-    <div id="load-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-load-btn" class="close-btn">×</button>
-            <h2>Load Chat</h2>
-            <div id="saved-chats-list" style="max-height: 300px; overflow-y: auto;"></div>
-        </div>
-    </div>
+      <h3 style="margin-top:0;">Advanced Settings</h3>
+      <div class="form-group">
+        <label for="advanced-temperature" style="display:flex; justify-content:space-between; color:var(--text-dim); font-size:.9em; margin-bottom:5px;">
+          <span>Temperature (Creativity)</span>
+          <span id="temp-display">0.7</span>
+        </label>
+        <input type="range" id="advanced-temperature" min="0" max="2" step="0.1" value="0.7" style="width:100%; cursor:pointer;" />
+      </div>
 
-    <!-- Scripts: Order is important! -->
-    <script src="audio.js"></script>
-    <script src="visuals.js"></script>
-    <script src="ui.js"></script>
-    <script src="renderer.js"></script>
+      <div class="form-group">
+        <label for="max-context">Max Context Limit</label>
+        <input type="number" id="max-context" placeholder="e.g. 8192, 32000, 128000" />
+      </div>
+
+      <div class="form-group">
+        <textarea id="advanced-prompt-content" rows="6" placeholder="Enter custom system instructions..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <button id="save-advanced-prompt-btn" class="tool-btn primary" type="button" style="width:100%;">Save Advanced Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Persona Modal -->
+  <div id="persona-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="persona-title">
+    <div class="modal-content">
+      <button id="close-persona-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="persona-title">User Persona</h2>
+
+      <div class="form-group">
+        <label for="persona-name">Name</label>
+        <input type="text" id="persona-name" />
+      </div>
+
+      <div class="form-group">
+        <label for="persona-details">Details / Appearance</label>
+        <textarea id="persona-details" rows="5" placeholder="Describe yourself for the AI..."></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button id="save-persona-btn" class="tool-btn primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Modal -->
+  <div id="summary-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="summary-title">
+    <div class="modal-content">
+      <button id="close-summary-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="summary-title">Story Summary</h2>
+      <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
+        This is auto-generated to help the AI remember long conversations.
+      </p>
+
+      <div class="form-group">
+        <textarea id="summary-content" rows="10"></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button id="save-summary-btn" class="tool-btn primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lorebook Modal -->
+  <div id="lorebook-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="lorebook-title">
+    <div class="modal-content" style="width:600px; max-width:90%;">
+      <button id="close-lorebook-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="lorebook-title">Lorebook Editor</h2>
+      <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
+        View and edit dynamic lore entries generated by the AI.
+      </p>
+
+      <div class="form-group">
+        <textarea
+          id="lorebook-content"
+          rows="15"
+          placeholder="[]"
+          style="font-family:monospace; font-size:.9em; white-space:pre; overflow-x:auto;"
+        ></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button id="save-lorebook-btn" class="tool-btn primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-content" style="width:400px;">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-text" style="margin-bottom:20px; color:#ddd;"></p>
+
+      <div class="modal-footer">
+        <button id="confirm-cancel-btn" class="tool-btn" type="button">Cancel</button>
+        <button id="confirm-yes-btn" class="tool-btn danger" type="button">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load Chat Modal -->
+  <div id="load-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="load-title">
+    <div class="modal-content">
+      <button id="close-load-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="load-title">Load Chat</h2>
+      <div id="saved-chats-list" style="max-height:300px; overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- Scripts (defer preserves order while not blocking HTML parsing) -->
+  <script src="audio.js" defer></script>
+  <script src="visuals.js" defer></script>
+  <script src="ui.js" defer></script>
+  <script src="renderer.js" defer></script>
 </body>
 </html>
