@@ -689,7 +689,7 @@ module.exports = function registerIpcHandlers(paths) {
     for (const name of activeCharacters) {
       const charPath = path.join(botFilesPath, 'characters', name, 'personality.txt');
       if (fs.existsSync(charPath)) {
-        const text = readTextSafe(charPath, '').slice(0, 1000);
+        const text = readTextSafe(charPath, '').slice(0, 5000);
         originalPersonalities += `\n[${name}'s ORIGINAL CORE PERSONALITY]\n${text}...`;
       }
     }
@@ -712,7 +712,8 @@ ${JSON.stringify(currentState, null, 2)}
 ${recentHistory}
 [INSTRUCTIONS]
 Analyze the recent interaction.
-Update the state for: ${activeCharacters.join(', ')}.
+1. Update the state for: ${activeCharacters.join(', ')}.
+2. [DRIFT CORRECTION]: Check if the current state has drifted from the [ORIGINAL CORE PERSONALITY]. If so, correct the Mood/Thoughts to realign with the character's true nature.
 Fields to update:
 - Mood: Current emotional baseline.
 - Trust: Level of trust in the user.
@@ -745,7 +746,18 @@ Output a JSON object keyed by character name containing these fields.`;
         }
       }
 
-      writeJsonSafe(lorebookPath, loreArray);
+      // Deduplicate Lorebook
+      const uniqueLore = [];
+      const seenSigs = new Set();
+      for (const entry of loreArray) {
+        const sig = JSON.stringify({ k: (entry.keywords || []).sort(), c: (entry.scenario || entry.entry || '').trim() });
+        if (!seenSigs.has(sig)) {
+          seenSigs.add(sig);
+          uniqueLore.push(entry);
+        }
+      }
+
+      writeJsonSafe(lorebookPath, uniqueLore);
 
       const merged = { ...currentState, ...updates };
       writeJsonSafe(characterStatePath, merged);

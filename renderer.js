@@ -39,6 +39,7 @@ window.botInfo = { personality: '', scenario: '', initial: '', characters: {} };
 window.userPersona = { name: 'Jim', details: '' };
 window.chatSummary = { content: '' };
 window.imageManifest = {}; // { backgrounds, sprites, splash, music }
+const activeSprites = window.__activeSprites;
 
 let turnCount = 0;
 
