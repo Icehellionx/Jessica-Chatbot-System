@@ -7,6 +7,7 @@ const saveChatBtn = document.getElementById('save-chat-btn');
 const loadChatBtn = document.getElementById('load-chat-btn');
 const resetChatBtn = document.getElementById('reset-chat-btn');
 const undoBtn = document.getElementById('undo-btn');
+const redoBtn = document.getElementById('redo-btn');
 const loadModal = document.getElementById('load-modal');
 const personaBtn = document.getElementById('persona-btn');
 const personaModal = document.getElementById('persona-modal');
@@ -16,9 +17,10 @@ const summaryBtn = document.getElementById('summary-btn');
 const summaryModal = document.getElementById('summary-modal');
 const closeSummaryBtn = document.getElementById('close-summary-btn');
 const saveSummaryBtn = document.getElementById('save-summary-btn');
-const advancedPromptBtn = document.getElementById('advanced-prompt-btn');
-const advancedPromptModal = document.getElementById('advanced-prompt-modal');
-const closeAdvancedPromptBtn = document.getElementById('close-advanced-prompt-btn');
+const lorebookBtn = document.getElementById('lorebook-btn');
+const lorebookModal = document.getElementById('lorebook-modal');
+const closeLorebookBtn = document.getElementById('close-lorebook-btn');
+const saveLorebookBtn = document.getElementById('save-lorebook-btn');
 const saveAdvancedPromptBtn = document.getElementById('save-advanced-prompt-btn');
 const confirmModal = document.getElementById('confirm-modal');
 const confirmTitle = document.getElementById('confirm-title');
@@ -50,20 +52,32 @@ confirmCancelBtn.addEventListener('click', () => {
 });
 
 function setupUI(callbacks) {
-    const { initializeChat, renderChat, saveCurrentChatState } = callbacks;
+    const { initializeChat, renderChat, saveCurrentChatState, regenerateResponse } = callbacks;
+
+    const toggleBaseUrl = (providerSelect, baseUrlGroup) => {
+        if (providerSelect.value === 'local') {
+            baseUrlGroup.style.display = 'block';
+        } else {
+            baseUrlGroup.style.display = 'none';
+        }
+    };
+
+    document.getElementById('setup-provider').addEventListener('change', (e) => toggleBaseUrl(e.target, document.getElementById('setup-base-url-group')));
+    document.getElementById('options-provider').addEventListener('change', (e) => toggleBaseUrl(e.target, document.getElementById('options-base-url-group')));
 
     // --- Setup Modal Logic ---
     document.getElementById('save-setup-btn').addEventListener('click', async () => {
         const provider = document.getElementById('setup-provider').value;
         const key = document.getElementById('setup-key').value.trim();
         const model = document.getElementById('setup-model').value.trim();
+        const baseUrl = document.getElementById('setup-base-url').value.trim();
 
-        if (!key) {
+        if (!key && provider !== 'local') {
             alert("Please enter an API key.");
             return;
         }
 
-        await window.api.saveApiKey(provider, key, model);
+        await window.api.saveApiKey(provider, key, model, baseUrl);
         setupModal.classList.add('hidden');
         
         const currentPersona = await window.api.getPersona();
@@ -83,8 +97,24 @@ function setupUI(callbacks) {
     });
 
     // --- Options Modal Logic ---
-    optionsBtn.addEventListener('click', () => {
+    optionsBtn.addEventListener('click', async () => {
         renderKeysList();
+        
+        // Load Advanced Settings
+        const prompt = await window.api.getAdvancedPrompt();
+        const config = await window.api.getConfig();
+        const temp = config.temperature !== undefined ? config.temperature : 0.7;
+        const maxCtx = config.maxContext || 128000;
+        
+        document.getElementById('advanced-prompt-content').value = prompt || '';
+        document.getElementById('advanced-temperature').value = temp;
+        document.getElementById('temp-display').textContent = temp;
+        document.getElementById('max-context').value = maxCtx;
+        
+        // Update Token Meter
+        const currentTokens = estimateTokenCount(prompt);
+        updateTokenUsageDisplay(currentTokens, maxCtx);
+        
         optionsModal.classList.remove('hidden');
     });
 
@@ -96,15 +126,17 @@ function setupUI(callbacks) {
         const provider = document.getElementById('options-provider').value;
         const key = document.getElementById('options-key').value.trim();
         const model = document.getElementById('options-model').value.trim();
+        const baseUrl = document.getElementById('options-base-url').value.trim();
 
-        if (!key) {
+        if (!key && provider !== 'local') {
             alert("Please enter an API key.");
             return;
         }
 
-        await window.api.saveApiKey(provider, key, model);
+        await window.api.saveApiKey(provider, key, model, baseUrl);
         document.getElementById('options-key').value = ''; // Clear input
         document.getElementById('options-model').value = ''; // Clear input
+        document.getElementById('options-base-url').value = ''; // Clear input
         renderKeysList(); // Refresh list
     });
 
@@ -177,22 +209,40 @@ function setupUI(callbacks) {
         alert("Summary saved!");
     });
 
-    // --- Advanced Prompt Logic ---
-    advancedPromptBtn.addEventListener('click', async () => {
-        const prompt = await window.api.getAdvancedPrompt();
-        document.getElementById('advanced-prompt-content').value = prompt || '';
-        advancedPromptModal.classList.remove('hidden');
+    // --- Lorebook Logic ---
+    lorebookBtn.addEventListener('click', async () => {
+        const lore = await window.api.getLorebook();
+        document.getElementById('lorebook-content').value = JSON.stringify(lore, null, 2);
+        lorebookModal.classList.remove('hidden');
     });
 
-    closeAdvancedPromptBtn.addEventListener('click', () => {
-        advancedPromptModal.classList.add('hidden');
+    closeLorebookBtn.addEventListener('click', () => {
+        lorebookModal.classList.add('hidden');
+    });
+
+    saveLorebookBtn.addEventListener('click', async () => {
+        try {
+            const content = JSON.parse(document.getElementById('lorebook-content').value);
+            await window.api.saveLorebook(content);
+            lorebookModal.classList.add('hidden');
+            alert("Lorebook saved!");
+        } catch (e) {
+            alert("Invalid JSON: " + e.message);
+        }
+    });
+
+    document.getElementById('advanced-temperature').addEventListener('input', (e) => {
+        document.getElementById('temp-display').textContent = e.target.value;
     });
 
     saveAdvancedPromptBtn.addEventListener('click', async () => {
         const prompt = document.getElementById('advanced-prompt-content').value.trim();
+        const temp = document.getElementById('advanced-temperature').value;
+        const maxCtx = document.getElementById('max-context').value;
+        await window.api.saveTemperature(temp);
+        await window.api.saveMaxContext(maxCtx);
         await window.api.saveAdvancedPrompt(prompt);
-        advancedPromptModal.classList.add('hidden');
-        alert("Advanced prompt saved!");
+        alert("Advanced settings saved!");
     });
 
     // --- Chat Management Logic ---
@@ -266,6 +316,43 @@ function setupUI(callbacks) {
             }
         }
     });
+
+    redoBtn.addEventListener('click', () => {
+        regenerateResponse();
+    });
+    
+    // Live update for token meter when max context changes
+    document.getElementById('max-context').addEventListener('input', (e) => {
+        const max = parseInt(e.target.value) || 128000;
+        const current = estimateTokenCount(document.getElementById('advanced-prompt-content').value);
+        updateTokenUsageDisplay(current, max);
+    });
+}
+
+function estimateTokenCount(additionalText = "") {
+    let text = additionalText;
+    if (window.botInfo) {
+        text += (window.botInfo.personality || "") + (window.botInfo.scenario || "");
+        if (window.botInfo.characters) Object.values(window.botInfo.characters).forEach(c => text += c);
+    }
+    if (window.userPersona) text += (window.userPersona.name || "") + (window.userPersona.details || "");
+    if (window.chatSummary) text += (window.chatSummary.content || "");
+    if (window.messages) window.messages.forEach(m => text += m.content);
+    
+    // Rough estimate: 1 token ~= 4 chars for English
+    return Math.ceil(text.length / 4);
+}
+
+function updateTokenUsageDisplay(current, max) {
+    const percentage = Math.min(100, Math.max(0, (current / max) * 100));
+    document.getElementById('token-usage-text').textContent = `${current.toLocaleString()} / ${max.toLocaleString()}`;
+    document.getElementById('token-percentage').textContent = `${percentage.toFixed(1)}%`;
+    const bar = document.getElementById('token-bar');
+    bar.style.width = `${percentage}%`;
+    
+    if (percentage > 90) bar.style.background = '#d13438'; // Red
+    else if (percentage > 75) bar.style.background = '#ffaa00'; // Yellow
+    else bar.style.background = '#0078d4'; // Blue
 }
 
 async function renderKeysList() {
@@ -285,10 +372,11 @@ async function renderKeysList() {
         
         const maskedKey = key.substring(0, 4) + '...' + key.substring(key.length - 4);
         const modelName = (config.models && config.models[provider]) ? ` (${config.models[provider]})` : '';
+        const baseUrlInfo = (config.baseUrls && config.baseUrls[provider]) ? ` [${config.baseUrls[provider]}]` : '';
         const isActive = provider === activeProvider;
         
         item.innerHTML = `
-            <span><strong>${provider}${modelName}:</strong> ${maskedKey} ${isActive ? ' <span style="color:lime; font-weight:bold;">[ACTIVE]</span>' : ''}</span>
+            <span><strong>${provider}${modelName}${baseUrlInfo}:</strong> ${maskedKey} ${isActive ? ' <span style="color:lime; font-weight:bold;">[ACTIVE]</span>' : ''}</span>
             <div>
                 ${!isActive ? `<button class="activate-btn" data-provider="${provider}" style="background:#0078d4; color:white; border:none; border-radius:3px; cursor:pointer; margin-right:5px;">Use</button>` : ''}
                 <button class="delete-btn" data-provider="${provider}" style="background:#d13438; color:white; border:none; border-radius:3px; cursor:pointer;">Delete</button>

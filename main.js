@@ -16,6 +16,8 @@ const personaPath = path.join(userDataPath, 'persona.json');
 const summaryPath = path.join(userDataPath, 'summary.json');
 const currentChatPath = path.join(userDataPath, 'current-chat.json');
 const advancedPromptPath = path.join(botFilesPath, 'advanced_prompt.txt');
+const characterStatePath = path.join(userDataPath, 'character_state.json');
+const lorebookPath = path.join(userDataPath, 'aura_lorebook.json');
 
 // Ensure bot files directory exists
 if (!fs.existsSync(botFilesPath)) {
@@ -153,6 +155,8 @@ const paths = {
     personaPath,
     summaryPath,
     currentChatPath,
-    advancedPromptPath
+    advancedPromptPath,
+    characterStatePath,
+    lorebookPath
 };
 require('./ipcHandlers')(paths);

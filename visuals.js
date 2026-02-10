@@ -141,6 +141,12 @@ async function preloadImages() {
     // load(images.sprites);
 }
 
+/**
+ * Finds a valid image path from the manifest based on a fuzzy input string.
+ * @param {string} filename - The input tag value (e.g. "happy", "Jessica/happy")
+ * @param {string} type - The category (backgrounds, sprites, etc.)
+ * @returns {string|null} - The full relative path or null
+ */
 function validateImage(filename, type) {
     if (!window.imageManifest[type]) return null;
     
@@ -271,7 +277,13 @@ function getCharacterName(filename) {
     
     // Heuristic: "jessica_happy.png" -> "jessica"
     const base = filename.split('/').pop();
-    return base.split(/[_\-\.]/)[0].toLowerCase();
+    
+    // Only strip extension/suffix if it looks like a file (has an image extension)
+    if (/\.(png|jpg|jpeg|webp|gif)$/i.test(base)) {
+        return base.split(/[_\-\.]/)[0].toLowerCase();
+    }
+    
+    return base.toLowerCase();
 }
 
 function changeBackground(filename) {
@@ -359,6 +371,20 @@ function updateSprite(filename) {
 
 function hideSprite(nameOrFilename) {
     hideSplash();
+    
+    // Support HIDE: ALL to clear screen
+    if (nameOrFilename.toLowerCase() === 'all' || nameOrFilename.toLowerCase() === 'everyone') {
+        activeSprites.forEach((img) => {
+            img.classList.remove('active');
+            setTimeout(() => {
+                if (img.parentNode) img.parentNode.removeChild(img);
+                img.src = '';
+            }, 500);
+        });
+        activeSprites.clear();
+        return;
+    }
+
     // Capture positions before removing
     const oldRects = getSpriteRects();
 
@@ -460,14 +486,27 @@ function adjustSpriteOverlap() {
     });
 }
 
-function processVisualTags(text) {
-    // Regex to find tags (global, case-insensitive, handles optional quotes)
-    const bgRegex = /\[BG:\s*["']?([^"\]]*)["']?\]/gi;
-    const spriteRegex = /\[SPRITE:\s*["']?([^"\]]*)["']?\]/gi;
-    const splashRegex = /\[SPLASH:\s*["']?([^"\]]*)["']?\]/gi;
-    const musicRegex = /\[MUSIC:\s*["']?([^"\]]*)["']?\]/gi;
-    const hideRegex = /\[HIDE:\s*["']?([^"\]]*)["']?\]/gi;
+// Shared regex patterns for tags
+const visualTagRegexes = {
+    bg: /\[BG:\s*["']?([^"\]]*)["']?\]/gi,
+    sprite: /\[SPRITE:\s*["']?([^"\]]*)["']?\]/gi,
+    splash: /\[SPLASH:\s*["']?([^"\]]*)["']?\]/gi,
+    music: /\[MUSIC:\s*["']?([^"\]]*)["']?\]/gi,
+    hide: /\[HIDE:\s*["']?([^"\]]*)["']?\]/gi
+};
 
+function stripVisualTags(text) {
+    if (!text) return '';
+    let cleanedText = text
+        .replace(visualTagRegexes.bg, '')
+        .replace(visualTagRegexes.sprite, '')
+        .replace(visualTagRegexes.splash, '')
+        .replace(visualTagRegexes.music, '')
+        .replace(visualTagRegexes.hide, '');
+    return cleanedText.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function processVisualTags(text) {
     // Collect all matches
     const matches = [];
     const addMatches = (regex, type) => {
@@ -479,11 +518,11 @@ function processVisualTags(text) {
             });
         }
     };
-    addMatches(bgRegex, 'bg');
-    addMatches(spriteRegex, 'sprite');
-    addMatches(splashRegex, 'splash');
-    addMatches(musicRegex, 'music');
-    addMatches(hideRegex, 'hide');
+    addMatches(visualTagRegexes.bg, 'bg');
+    addMatches(visualTagRegexes.sprite, 'sprite');
+    addMatches(visualTagRegexes.splash, 'splash');
+    addMatches(visualTagRegexes.music, 'music');
+    addMatches(visualTagRegexes.hide, 'hide');
 
     // Sort by index to process in order
     matches.sort((a, b) => a.index - b.index);
@@ -532,8 +571,6 @@ function processVisualTags(text) {
         }
     });
 
-    // Remove ALL tags from the text so they don't clutter history/tokens
-    let cleanedText = text.replace(bgRegex, '').replace(spriteRegex, '').replace(hideRegex, '').replace(splashRegex, '').replace(musicRegex, '');
-    // Refill empty space: Trim whitespace and collapse excessive newlines
-    return cleanedText.replace(/\n{3,}/g, '\n\n').trim();
+    // Return cleaned text for convenience, though we now use stripVisualTags explicitly in renderer
+    return stripVisualTags(text);
 }

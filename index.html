@@ -245,12 +245,8 @@
     <div id="main-body">
         <div id="toolbar">
             <button id="undo-btn" class="tool-btn" title="Undo Last Turn">↶ Undo</button>
+            <button id="redo-btn" class="tool-btn" title="Regenerate Response">↻ Redo</button>
             <button id="reset-chat-btn" class="tool-btn" title="Reset Chat">↻ Reset</button>
-            <button id="load-chat-btn" class="tool-btn" title="Load Chat">📂 Load</button>
-            <button id="save-chat-btn" class="tool-btn" title="Save Chat">💾 Save</button>
-            <button id="summary-btn" class="tool-btn" title="View/Edit Summary">📝 Summary</button>
-            <button id="persona-btn" class="tool-btn" title="Edit Persona">👤 Persona</button>
-            <button id="advanced-prompt-btn" class="tool-btn" title="Edit Advanced Prompt">🧠 Advanced</button>
             <button id="options-btn" class="tool-btn" title="Settings">⚙️ Options</button>
         </div>
         <div id="chat-history"></div>
@@ -273,6 +269,7 @@
                     <option value="grok">xAI (Grok)</option>
                     <option value="chutes">Chutes.ai</option>
                     <option value="featherless">Featherless.ai</option>
+                    <option value="local">Local LLM (LM Studio/Ollama)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -282,6 +279,10 @@
             <div class="form-group">
                 <label>Model (Optional)</label>
                 <input type="text" id="setup-model" placeholder="e.g. gemini-1.5-flash">
+            </div>
+            <div class="form-group" id="setup-base-url-group" style="display:none;">
+                <label>Base URL</label>
+                <input type="text" id="setup-base-url" placeholder="e.g. http://localhost:1234/v1">
             </div>
             <div class="modal-footer">
                 <button id="save-setup-btn" class="tool-btn" style="background:#0078d4; border:none;">Save & Start</button>
@@ -294,6 +295,14 @@
         <div class="modal-content">
             <button id="close-options-btn" class="close-btn">×</button>
             <h2>Options</h2>
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <button id="save-chat-btn" class="tool-btn">💾 Save Chat</button>
+                <button id="load-chat-btn" class="tool-btn">📂 Load Chat</button>
+                <button id="summary-btn" class="tool-btn">📝 Summary</button>
+                <button id="persona-btn" class="tool-btn">👤 Persona</button>
+                <button id="lorebook-btn" class="tool-btn">📖 Lorebook</button>
+            </div>
+            <hr style="border-color:#444; margin: 20px 0;">
             <div class="form-group">
                 <label>Add/Update Key</label>
                 <select id="options-provider">
@@ -303,6 +312,7 @@
                     <option value="grok">xAI (Grok)</option>
                     <option value="chutes">Chutes.ai</option>
                     <option value="featherless">Featherless.ai</option>
+                    <option value="local">Local LLM (LM Studio/Ollama)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -310,6 +320,9 @@
             </div>
             <div class="form-group">
                 <input type="text" id="options-model" placeholder="Model ID (Optional)">
+            </div>
+            <div class="form-group" id="options-base-url-group" style="display:none;">
+                <input type="text" id="options-base-url" placeholder="Base URL (e.g. http://localhost:1234/v1)">
             </div>
             <div class="form-group" style="display:flex; gap:10px;">
                 <button id="update-key-btn" class="tool-btn" style="flex:1;">Update Key</button>
@@ -321,6 +334,36 @@
             <hr style="border-color:#444; margin: 20px 0;">
             <div class="form-group">
                 <button id="scan-images-btn" class="tool-btn" style="width:100%;">Rescan Images</button>
+            </div>
+            <hr style="border-color:#444; margin: 20px 0;">
+            <h3 style="margin-top:0;">Token Usage (Estimate)</h3>
+            <div class="form-group">
+                <div style="display:flex; justify-content:space-between; color:#ccc; font-size:0.9em; margin-bottom:5px;">
+                    <span id="token-usage-text">0 / 128000</span>
+                    <span id="token-percentage">0%</span>
+                </div>
+                <div style="background:#444; height:10px; border-radius:5px; overflow:hidden;">
+                    <div id="token-bar" style="background:#0078d4; height:100%; width:0%; transition: width 0.3s;"></div>
+                </div>
+            </div>
+            <hr style="border-color:#444; margin: 20px 0;">
+            <h3 style="margin-top:0;">Advanced Settings</h3>
+            <div class="form-group">
+                <label style="display:flex; justify-content:space-between; color:#ccc; font-size:0.9em; margin-bottom:5px;">
+                    <span>Temperature (Creativity)</span>
+                    <span id="temp-display">0.7</span>
+                </label>
+                <input type="range" id="advanced-temperature" min="0" max="2" step="0.1" value="0.7" style="width:100%; cursor:pointer;">
+            </div>
+            <div class="form-group">
+                <label>Max Context Limit</label>
+                <input type="number" id="max-context" placeholder="e.g. 8192, 32000, 128000">
+            </div>
+            <div class="form-group">
+                <textarea id="advanced-prompt-content" rows="6" placeholder="Enter custom system instructions..."></textarea>
+            </div>
+            <div class="form-group">
+                <button id="save-advanced-prompt-btn" class="tool-btn" style="width:100%; background:#0078d4; border:none;">Save Advanced Settings</button>
             </div>
         </div>
     </div>
@@ -359,17 +402,17 @@
         </div>
     </div>
 
-    <!-- Advanced Prompt Modal -->
-    <div id="advanced-prompt-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-advanced-prompt-btn" class="close-btn">×</button>
-            <h2>Advanced Prompt</h2>
-            <p style="font-size:0.8em; color:#aaa; margin-top:-10px;">Inject custom instructions into the system prompt.</p>
+    <!-- Lorebook Modal -->
+    <div id="lorebook-modal" class="modal hidden">
+        <div class="modal-content" style="width: 600px; max-width: 90%;">
+            <button id="close-lorebook-btn" class="close-btn">×</button>
+            <h2>Lorebook Editor</h2>
+            <p style="font-size:0.8em; color:#aaa; margin-top:-10px;">View and edit dynamic lore entries generated by the AI.</p>
             <div class="form-group">
-                <textarea id="advanced-prompt-content" rows="10" placeholder="Enter custom system instructions..."></textarea>
+                <textarea id="lorebook-content" rows="15" placeholder="[]" style="font-family: monospace; font-size: 0.9em; white-space: pre; overflow-x: auto;"></textarea>
             </div>
             <div class="modal-footer">
-                <button id="save-advanced-prompt-btn" class="tool-btn" style="background:#0078d4; border:none;">Save</button>
+                <button id="save-lorebook-btn" class="tool-btn" style="background:#0078d4; border:none;">Save</button>
             </div>
         </div>
     </div>

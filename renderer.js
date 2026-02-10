@@ -6,7 +6,7 @@ const chatHistory = document.getElementById('chat-history');
 
 async function init() {
     setupVisuals();
-    setupUI({ initializeChat, renderChat, saveCurrentChatState });
+    setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse });
 
     // --- Title Screen Logic ---
     const titleScreenPromise = new Promise((resolve) => {
@@ -112,6 +112,7 @@ window.messages = []; // Store conversation history
 window.botInfo = { personality: '', scenario: '', initial: '', characters: {} };
 window.userPersona = { name: 'Jim', details: '' };
 window.chatSummary = { content: '' };
+let turnCount = 0; // Track turns for throttling and summary
 
 function parseMarkdown(text) {
     if (!text) return '';
@@ -125,8 +126,8 @@ function parseMarkdown(text) {
     html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
     // Bold (**text**)
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Italic (*text*)
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    // Italic (*text* or _text_)
+    html = html.replace(/(\*|_)(.*?)\1/g, '<em>$2</em>');
 
     // Convert newlines to <br>
     return html.replace(/\n/g, '<br>');
@@ -138,7 +139,8 @@ function appendMessage(role, text, index) {
     
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.innerHTML = parseMarkdown(text);
+    // Strip tags before displaying so they don't show up in the chat bubble
+    contentDiv.innerHTML = parseMarkdown(stripVisualTags(text));
     msgDiv.appendChild(contentDiv);
 
     if (typeof index === 'number') {
@@ -221,26 +223,61 @@ async function initializeChat() {
         let initialText = window.botInfo.initial || "⚠️ Error: Could not load 'bot/files/initial.txt'. Please check that the file exists in the correct folder.";
         initialText = initialText.replace(/{{user}}/g, window.userPersona.name);
 
-        if (!initialText.match(/\[MUSIC:/i)) {
-            playMusic(null);
-        }
-
         // If no tags are present, ask the AI to pick images based on the text
-        if (!initialText.includes('[BG:')) {
-            const tagPrompt = [
-                { role: 'system', content: "Analyze the following text and generate the most appropriate [BG: \"filename\"], [SPRITE: \"Character/Expression\"], and [MUSIC: \"filename\"] tags from the available options. Output ONLY the tags." },
-                { role: 'user', content: initialText }
-            ];
-            try {
-                const tagResponse = await window.api.sendChat(tagPrompt);
-                processVisualTags(tagResponse);
-            } catch (e) {
-                console.error("Failed to auto-scan images:", e);
+        if (!initialText.match(/\[(BG|SPRITE|SPLASH|MUSIC|HIDE):/i)) {
+            // Fallback: Use local sentiment analysis instead of a second API call
+            const mood = getMood(initialText);
+            const activeChars = getSceneContext(initialText);
+            activeChars.forEach(charName => {
+                const sprite = findBestSprite(charName, mood);
+                if (sprite) updateSprite(sprite);
+            });
+
+            const normText = initialText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+            // Check for Background
+            if (window.imageManifest.backgrounds) {
+                const bgs = Object.keys(window.imageManifest.backgrounds);
+                const bestBg = bgs.find(bg => {
+                    const name = bg.split(/[/\\]/).pop().split('.')[0].toLowerCase();
+                    return name.length > 2 && normText.includes(name);
+                });
+                if (bestBg) changeBackground(bestBg);
             }
         }
 
-        const cleanText = processVisualTags(initialText);
-        window.messages.push({ role: 'assistant', content: cleanText.trim() });
+        // Check for Music (Fallback if no explicit music tag is present)
+        if (!initialText.match(/\[MUSIC:/i)) {
+            let musicFound = false;
+            if (window.imageManifest.music) {
+                const tracks = Object.keys(window.imageManifest.music);
+                
+                const findTrack = (text) => {
+                    if (!text) return null;
+                    const norm = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+                    return tracks.find(track => {
+                        const name = track.split(/[/\\]/).pop().split('.')[0].toLowerCase();
+                        return name.length > 2 && norm.includes(name);
+                    });
+                };
+
+                let bestTrack = findTrack(initialText);
+                if (!bestTrack) bestTrack = findTrack(window.botInfo.scenario);
+
+                if (!bestTrack) {
+                    bestTrack = tracks.find(t => t.toLowerCase().includes('default'));
+                }
+
+                if (bestTrack) {
+                    playMusic(bestTrack);
+                    musicFound = true;
+                }
+            }
+            if (!musicFound) playMusic(null);
+        }
+
+        processVisualTags(initialText); // Execute tags
+        window.messages.push({ role: 'assistant', content: initialText.trim() }); // Store raw text with tags
         turnCount = 0; // Reset turn count on new chat
         renderChat();
         saveCurrentChatState();
@@ -387,9 +424,14 @@ function getSceneContext(userText) {
         });
     }
 
-    // 3. If scene is empty (start of chat), include everyone to be safe
+    // 3. If scene is empty, try to infer from scenario instead of dumping everyone
     if (activeNames.size === 0 && window.botInfo.characters) {
-        Object.keys(window.botInfo.characters).forEach(name => activeNames.add(name.toLowerCase()));
+        const scenarioLower = (window.botInfo.scenario || "").toLowerCase();
+        Object.keys(window.botInfo.characters).forEach(name => {
+            if (scenarioLower.includes(name.toLowerCase())) {
+                activeNames.add(name.toLowerCase());
+            }
+        });
     }
 
     return Array.from(activeNames);
@@ -417,7 +459,8 @@ async function streamChat(payload, sceneCharacters) {
                 hasReceivedChunk = true;
             }
             accumulatedText += chunk;
-            contentDiv.innerHTML = parseMarkdown(accumulatedText);
+            // Clean tags in real-time so they don't "float" in the chat
+            contentDiv.innerHTML = parseMarkdown(stripVisualTags(accumulatedText));
             chatHistory.scrollTop = chatHistory.scrollHeight;
         });
 
@@ -431,27 +474,24 @@ async function streamChat(payload, sceneCharacters) {
 
         // Check for visual tags. If missing, ask AI to generate them.
         if (!fullResponse.match(/\[(BG|SPRITE|SPLASH|MUSIC|HIDE):/i)) {
-             const tagPrompt = [
-                { role: 'system', content: "Analyze the following text and generate the most appropriate [BG: \"filename\"], [SPRITE: \"Character/Expression\"], and [MUSIC: \"filename\"] tags from the available options. Output ONLY the tags." },
-                { role: 'user', content: fullResponse }
-            ];
-            try {
-                const tagResponse = await window.api.sendChat(tagPrompt);
-                processVisualTags(tagResponse);
-            } catch (e) {
-                console.error("Failed to auto-scan images:", e);
-            }
+            // Fallback: Use local sentiment analysis instead of a second API call
+            const mood = getMood(fullResponse);
+            const activeChars = getSceneContext(fullResponse); // Use context from response
+            activeChars.forEach(charName => {
+                const sprite = findBestSprite(charName, mood);
+                if (sprite) updateSprite(sprite);
+            });
         }
 
-        // Process visual tags now that we have the full text
-        const cleanResponse = processVisualTags(fullResponse);
+        // Execute visual tags now that we have the full text
+        processVisualTags(fullResponse);
         
         // Update the message content one last time with the processed text (tags removed)
-        contentDiv.innerHTML = parseMarkdown(cleanResponse);
+        contentDiv.innerHTML = parseMarkdown(stripVisualTags(fullResponse));
         
-        return cleanResponse.trim();
+        return fullResponse.trim(); // Return raw response to be saved in history
     } catch (e) {
-        contentDiv.innerHTML += `<br><span style="color:red">Error: ${e.message}</span>`;
+        // Error is handled in handleSend now
         throw e;
     } finally {
         if (removeListener) removeListener();
@@ -473,6 +513,13 @@ async function handleSend() {
     // Determine active characters for this turn
     const sceneCharacters = getSceneContext(text);
     
+    // --- PASS 1: CHARACTER EVOLUTION (ASYNC) ---
+    // Run in background (no await) to update state for NEXT turn
+    // Throttle: Run every 3 turns to prevent token ballooning
+    if (turnCount % 3 === 0) {
+        window.api.evolveCharacterState(window.messages, sceneCharacters).catch(e => console.warn("Evolution skipped:", e));
+    }
+
     // Inject only relevant character personalities
     sceneCharacters.forEach(name => {
         // Find the key in window.botInfo.characters that matches the lowercase name
@@ -496,17 +543,32 @@ async function handleSend() {
     const payload = systemContent ? [{ role: 'system', content: systemContent }, ...window.messages] : window.messages;
     
     // 3. Stream Response
-    const cleanResponse = await streamChat(payload, sceneCharacters);
-    
-    window.messages.push({ role: 'assistant', content: cleanResponse });
-    saveCurrentChatState();
+    try {
+        const cleanResponse = await streamChat(payload, sceneCharacters);
+        
+        window.messages.push({ role: 'assistant', content: cleanResponse });
+        saveCurrentChatState();
 
-    // Auto-Summary Logic
-    turnCount++;
-    if (turnCount > 0 && turnCount % 10 === 0) {
-        const isFullRewrite = (turnCount % 50 === 0);
-        updateHistorySummary(isFullRewrite);
+        // Auto-Summary Logic
+        turnCount++;
+        if (turnCount > 0 && turnCount % 10 === 0) {
+            const isFullRewrite = (turnCount % 50 === 0);
+            updateHistorySummary(isFullRewrite);
+        }
+    } catch (error) {
+        console.error("Chat Error:", error);
+        // Remove the user message we just added to prevent "orphaned" messages
+        window.messages.pop();
+        
+        // Remove the last two message divs (User's message + Assistant's failed typing indicator)
+        if (chatHistory.lastChild) chatHistory.removeChild(chatHistory.lastChild); // Assistant
+        if (chatHistory.lastChild) chatHistory.removeChild(chatHistory.lastChild); // User
+        
+        // Restore input
+        userInput.value = text;
+        alert(`Failed to send message: ${error.message || "Unknown error"}`);
     }
+    
     sendBtn.focus();
     setTimeout(() => userInput.focus(), 50);
 }
