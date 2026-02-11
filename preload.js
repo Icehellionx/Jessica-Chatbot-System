@@ -24,8 +24,14 @@ contextBridge.exposeInMainWorld('api', {
     getImages: () => ipcRenderer.invoke('get-images'),
     getImageManifest: () => ipcRenderer.invoke('get-image-manifest'),
     saveCurrentChat: (data) => ipcRenderer.invoke('save-current-chat', data),
+    clearVoiceMap: () => ipcRenderer.invoke('clear-voice-map'),
+    getVoiceMap: () => ipcRenderer.invoke('get-voice-map'),
+    saveVoiceMap: (map) => ipcRenderer.invoke('save-voice-map', map),
+    scanVoiceBuckets: () => ipcRenderer.invoke('scan-voice-buckets'),
     loadCurrentChat: () => ipcRenderer.invoke('load-current-chat'),
     testProvider: () => ipcRenderer.invoke('test-provider'),
+    generateSpeech: (text, voiceId, forcedSpeakerId) => ipcRenderer.invoke('generate-speech', text, voiceId, forcedSpeakerId),
+    generateImage: (prompt, type) => ipcRenderer.invoke('generate-image', prompt, type),
     onChatReplyChunk: (callback) => {
         const subscription = (event, chunk) => callback(chunk);
         ipcRenderer.on('chat-reply-chunk', subscription);

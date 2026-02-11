@@ -257,6 +257,47 @@ async function generateCompletion(config, messages, options = {}) {
 }
 
 /**
+ * Generate an embedding vector for the given text.
+ * Returns: number[] | null
+ */
+async function generateEmbedding(config, text) {
+  const settings = getProviderSettings(config);
+  if (!settings.apiKey && settings.provider !== 'local') return null;
+
+  try {
+    // Gemini Embedding
+    if (settings.isGemini) {
+      // Use text-embedding-004 for Gemini
+      const embedModel = 'text-embedding-004';
+      const url = `${GEMINI_API_BASE}/${embedModel}:embedContent?key=${encodeURIComponent(settings.apiKey)}`;
+      const response = await axios.post(url, {
+        content: { parts: [{ text }] }
+      });
+      return response?.data?.embedding?.values || null;
+    }
+
+    // OpenAI / Local Embedding
+    // Default to text-embedding-3-small for OpenAI, or use config model for local
+    let model = settings.model;
+    if (settings.provider === 'openai') model = 'text-embedding-3-small';
+    
+    // Local providers (Ollama/LM Studio) usually default to the loaded model if not specified,
+    // but it's safer to pass what we have or a specific embedding model if the user configured one.
+
+    const response = await axios.post(
+      `${settings.baseURL}/embeddings`,
+      { input: text, model },
+      { headers: authHeaders(settings.apiKey) }
+    );
+
+    return response?.data?.data?.[0]?.embedding || null;
+  } catch (e) {
+    console.warn('Embedding generation failed:', e?.message ?? e);
+    return null;
+  }
+}
+
+/**
  * Stream parser for OpenAI-compatible SSE format:
  *   data: {...}\n
  *   data: [DONE]\n
@@ -421,4 +462,6 @@ module.exports = {
   testConnection,
   generateCompletion,
   generateStream,
+  generateEmbedding,
+  axios,
 };

@@ -109,6 +109,12 @@
     const saveLorebookBtn = $("save-lorebook-btn");
 
     const saveAdvancedPromptBtn = $("save-advanced-prompt-btn");
+    const resetVoicesBtn = $("reset-voices-btn");
+    const editVoicesBtn = $("edit-voices-btn");
+    const voiceModal = $("voice-modal");
+    const closeVoiceBtn = $("close-voice-btn");
+    const saveVoiceBtn = $("save-voice-btn");
+    const voiceList = $("voice-list");
 
     const saveChatBtn = $("save-chat-btn");
     const loadChatBtn = $("load-chat-btn");
@@ -281,6 +287,117 @@
       const max = parseInt(e.target.value, 10) || 128000;
       const current = estimateTokenCount($("advanced-prompt-content").value || "");
       updateTokenUsageDisplay(current, max);
+    });
+
+    // Debug toggle
+    $("debug-toggle")?.addEventListener("change", (e) => {
+      if (window.setVisualDebugMode) {
+        window.setVisualDebugMode(e.target.checked);
+      }
+    });
+
+    // Reset Voices
+    resetVoicesBtn?.addEventListener("click", async () => {
+      const yes = await window.showConfirmModal("Reset Voices", "This will clear all assigned character voices. They will be re-assigned (with gender checks) the next time they speak. Continue?");
+      if (yes) {
+        await window.api.clearVoiceMap();
+        alert("Voice map cleared. Restart the app or reload the chat to apply.");
+      }
+    });
+
+    // Edit Voice Map
+    editVoicesBtn?.addEventListener("click", async () => {
+      const map = await window.api.getVoiceMap();
+      voiceList.innerHTML = "";
+      
+      Object.keys(map).sort().forEach(char => {
+        const row = document.createElement("div");
+        row.className = "form-group";
+        row.style.cssText = "display:flex; align-items:center; gap:10px; margin-bottom:10px;";
+        
+        row.innerHTML = `
+          <label style="flex:1; margin:0;">${escapeHtml(char)}</label>
+          <input type="number" class="voice-id-input" data-char="${escapeAttr(char)}" value="${map[char]}" style="width:80px;">
+          <button type="button" class="tool-btn test-voice-btn" data-char="${escapeAttr(char)}">Test</button>
+        `;
+        voiceList.appendChild(row);
+      });
+      
+      show(voiceModal);
+    });
+
+    closeVoiceBtn?.addEventListener("click", () => hide(voiceModal));
+
+    voiceList?.addEventListener("click", async (e) => {
+      if (e.target.classList.contains("test-voice-btn")) {
+        const btn = e.target;
+        const char = btn.getAttribute("data-char");
+        
+        // Direct lookup for the specific input next to the button
+        const siblingInput = btn.previousElementSibling;
+        const siblingValue = siblingInput ? parseInt(siblingInput.value, 10) : null;
+        
+        const originalText = btn.textContent;
+        btn.textContent = "⏳";
+        btn.disabled = true;
+
+        try {
+          // 1. Gather ALL current values from the UI to build the map
+          // This ensures we save exactly what the user sees
+          const inputs = voiceList.querySelectorAll(".voice-id-input");
+          const newMap = {};
+          inputs.forEach(inp => {
+            const c = inp.getAttribute("data-char");
+            const val = parseInt(inp.value, 10);
+            newMap[c] = isNaN(val) ? 0 : val;
+          });
+
+          // Force update the map with the sibling value if valid, just in case
+          if (siblingValue !== null && !isNaN(siblingValue)) {
+             newMap[char] = siblingValue;
+             console.log(`[UI] Using direct input value for ${char}: ${siblingValue}`);
+          }
+
+          console.log("[UI] Saving Voice Map:", newMap);
+          // 2. Save the map so the backend reads the new values
+          await window.api.saveVoiceMap(newMap);
+          
+          // Pass siblingValue (the number in the box) directly as forcedSpeakerId
+          const audioData = await window.api.generateSpeech(`Hi, I am ${char}. This is my voice.`, char, siblingValue);
+          
+          if (audioData) {
+            const src = audioData.startsWith('data:') ? audioData : `data:audio/mp3;base64,${audioData}`;
+            const audio = new Audio(src);
+            const volSlider = document.getElementById('voice-slider');
+            if (volSlider) audio.volume = parseFloat(volSlider.value) || 1.0;
+            
+            await new Promise((resolve, reject) => {
+              audio.onended = resolve;
+              audio.onerror = (e) => reject(new Error("Playback error"));
+              audio.play().catch(reject);
+            });
+          } else {
+            throw new Error("No audio data returned.");
+          }
+        } catch (err) {
+          console.error("Voice test failed", err);
+          alert("Test failed: " + err.message);
+        } finally {
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    saveVoiceBtn?.addEventListener("click", async () => {
+      const inputs = voiceList.querySelectorAll(".voice-id-input");
+      const newMap = {};
+      inputs.forEach(inp => {
+        newMap[inp.getAttribute("data-char")] = parseInt(inp.value, 10);
+      });
+      await window.api.saveVoiceMap(newMap);
+      hide(voiceModal);
+      alert("Voice map saved.");
     });
 
     // Save advanced settings

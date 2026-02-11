@@ -471,6 +471,18 @@
 
       <h3 style="margin-top:0;">Advanced Settings</h3>
       <div class="form-group">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:10px;">
+          <input type="checkbox" id="debug-toggle" />
+          <span>Enable Visual Debug Overlay</span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <button id="reset-voices-btn" class="tool-btn danger" type="button" style="width:100%;">Reset Character Voices</button>
+        <button id="edit-voices-btn" class="tool-btn" type="button" style="width:100%; margin-top:10px;">Edit Voice Map</button>
+      </div>
+
+      <div class="form-group">
         <label for="advanced-temperature" style="display:flex; justify-content:space-between; color:var(--text-dim); font-size:.9em; margin-bottom:5px;">
           <span>Temperature (Creativity)</span>
           <span id="temp-display">0.7</span>
@@ -511,6 +523,21 @@
 
       <div class="modal-footer">
         <button id="save-persona-btn" class="tool-btn primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Map Modal -->
+  <div id="voice-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="voice-title">
+    <div class="modal-content">
+      <button id="close-voice-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="voice-title">Voice Assignments</h2>
+      <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
+        Manually assign Piper Speaker IDs (0-900).
+      </p>
+      <div id="voice-list" style="max-height:400px; overflow-y:auto; margin-bottom:15px;"></div>
+      <div class="modal-footer">
+        <button id="save-voice-btn" class="tool-btn primary" type="button">Save</button>
       </div>
     </div>
   </div>
