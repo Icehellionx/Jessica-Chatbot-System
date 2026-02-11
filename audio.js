@@ -11,6 +11,7 @@ let currentMusic = null;      // The currently "active" Audio instance
 let musicVolume = 0.5;        // 0..1
 let isMuted = false;
 let voiceVolume = 1.0;        // 0..1 for TTS
+let isDucked = false;         // Ducking state for TTS
 
 const LOOP_CROSSFADE_MS = 2000;
 const FADE_TICK_MS = 50;
@@ -148,7 +149,20 @@ function setVolume(v) {
   musicVolume = clamp01(v);
   if (currentMusic && !currentMusic._isFading) {
     // If not currently fading, apply immediately.
-    currentMusic.volume = musicVolume;
+    currentMusic.volume = getEffectiveVolume();
+  }
+}
+
+function getEffectiveVolume() {
+  // Cap music at 20% if ducking is active
+  return isDucked ? Math.min(musicVolume, 0.2) : musicVolume;
+}
+
+function setDucking(active) {
+  if (isDucked === active) return;
+  isDucked = active;
+  if (currentMusic) {
+    fadeTo(currentMusic, getEffectiveVolume(), 500);
   }
 }
 
@@ -187,7 +201,7 @@ function playMusic(filename) {
         audio.pause();
         return;
       }
-      fadeTo(audio, musicVolume, 1000);
+      fadeTo(audio, getEffectiveVolume(), 1000);
     })
     .catch((e) => {
       console.error('Failed to play music:', e);
@@ -296,7 +310,7 @@ function triggerLoop(filename) {
       }
 
       // Crossfade
-      fadeTo(newMusic, musicVolume, LOOP_CROSSFADE_MS);
+      fadeTo(newMusic, getEffectiveVolume(), LOOP_CROSSFADE_MS);
       fadeTo(oldMusic, 0, LOOP_CROSSFADE_MS, () => {
         try { oldMusic.pause(); } catch {}
       });
@@ -418,6 +432,11 @@ class VoiceEngine {
       this.currentAudio.pause();
       this.currentAudio = null;
     }
+    // Stop animation for everyone when stopping
+    if (window.setCharSpeaking && window.getActiveSpriteNames) {
+      window.getActiveSpriteNames().forEach(n => window.setCharSpeaking(n, false));
+    }
+    setDucking(false);
     window.speechSynthesis.cancel();
     this.updateBtn(false);
   }
@@ -463,6 +482,8 @@ class VoiceEngine {
     // Regex captures delimiters: ["Narrator text ", "\"Dialogue\"", " more narrator"]
     const parts = clean.split(/([“"].*?[”"])/g).filter(p => p.trim());
 
+    let lastNarratorText = "";
+
     for (const part of parts) {
       const isDialogue = /^["“]/.test(part.trim());
       // Remove quotes and markdown emphasis (* or _) so TTS doesn't read "asterisk"
@@ -472,14 +493,55 @@ class VoiceEngine {
       let voiceId = 'narrator';
       
       if (isDialogue) {
-        // Heuristic: If only 1 character is on stage, it's probably them.
-        if (activeCharacters.length === 1) {
+        // 1. Try to detect speaker from the text immediately preceding the quote
+        let detectedChar = null;
+        
+        if (lastNarratorText && activeCharacters.length > 0) {
+          const lowerText = lastNarratorText.toLowerCase();
+          let bestIndex = -1;
+
+          // Find which active character was mentioned last before the quote
+          for (const charName of activeCharacters) {
+            const lowerChar = String(charName).toLowerCase();
+            const idx = lowerText.lastIndexOf(lowerChar);
+            
+            if (idx > bestIndex) {
+              bestIndex = idx;
+              detectedChar = lowerChar;
+            }
+          }
+        }
+
+        if (detectedChar) {
+          voiceId = detectedChar;
+        } else if (activeCharacters.length === 1) {
+          // 2. Fallback: If only 1 character is on stage, it's probably them.
           voiceId = activeCharacters[0].toLowerCase();
         } else {
-          // If multiple, we default to 'female' or 'male' generic if we can't guess.
-          // For now, let's just use a generic character voice ID.
-          voiceId = 'character_generic';
+          // 3. Last Resort: Generic
+          // Attempt gender guess based on active characters
+          let gender = 'unknown';
+          if (window.botInfo?.characters && activeCharacters.length > 0) {
+             let maleCount = 0;
+             let femaleCount = 0;
+             for (const char of activeCharacters) {
+                 const realName = Object.keys(window.botInfo.characters).find(k => k.toLowerCase() === char);
+                 if (realName) {
+                     const p = window.botInfo.characters[realName] || "";
+                     if (/\b(she|her|hers|woman|girl|female)\b/i.test(p)) femaleCount++;
+                     else if (/\b(he|him|his|man|boy|male)\b/i.test(p)) maleCount++;
+                 }
+             }
+             if (femaleCount > 0 && maleCount === 0) gender = 'female';
+             if (maleCount > 0 && femaleCount === 0) gender = 'male';
+          }
+
+          if (gender === 'female') voiceId = 'character_generic_female';
+          else if (gender === 'male') voiceId = 'character_generic_male';
+          else voiceId = 'character_generic_male';
         }
+      } else {
+        lastNarratorText = content;
       }
 
       this.queue.push({ text: content, voiceId });
@@ -496,61 +558,74 @@ class VoiceEngine {
     if (this.queue.length === 0) {
       this.isPlaying = false;
       this.updateBtn(false);
+      setDucking(false);
       return;
     }
 
     this.isPlaying = true;
+    setDucking(true);
     const { text, voiceId } = this.queue.shift();
 
+    let audioData = null;
     try {
       // Try Backend AI Generation first
-      const audioData = await window.api.generateSpeech(text, voiceId);
-
+      audioData = await window.api.generateSpeech(text, voiceId);
+      
       if (audioData) {
         console.log(`[Voice] Playing AI audio for ${voiceId}`);
+        
+        if (window.setCharSpeaking) window.setCharSpeaking(voiceId, true);
+
         // Play AI Audio (Base64)
         await new Promise((resolve) => {
           // Support both full Data URIs (from Piper/New StreamElements) and legacy raw base64
           const src = audioData.startsWith('data:') ? audioData : `data:audio/mp3;base64,${audioData}`;
           this.currentAudio = new Audio(src);
           this.currentAudio.volume = voiceVolume;
-          this.currentAudio.onended = resolve;
+          this.currentAudio.onended = () => {
+            if (window.setCharSpeaking) window.setCharSpeaking(voiceId, false);
+            resolve();
+          };
           this.currentAudio.onerror = resolve;
           this.currentAudio.play().catch(resolve);
         });
-      } else {
-        console.log(`[Voice] Fallback to Browser TTS for ${voiceId}`);
-        // Fallback: Browser TTS
-        await new Promise((resolve) => {
-          const u = new SpeechSynthesisUtterance(text);
-          u.volume = voiceVolume;
-          const voices = window.speechSynthesis.getVoices();
-          
-          // Helper to find better voices (Google, Edge Natural, etc)
-          const findVoice = (terms) => voices.find(v => terms.some(t => v.name.toLowerCase().includes(t)));
-
-          // Simple mapping logic for browser voices
-          // Heuristic: List known male IDs
-          if (['narrator', 'danny', 'jake'].includes(voiceId)) {
-            // Try to find a good male voice
-            u.voice = findVoice(['google us english', 'microsoft david', 'male']) || voices[0];
-            u.pitch = voiceId === 'narrator' ? 0.9 : 1.0;
-            u.rate = voiceId === 'narrator' ? 0.85 : 0.9;
-          } else {
-            // Try to find a good female voice
-            u.voice = findVoice(['google us english', 'microsoft zira', 'female']) || voices[0];
-            // If we grabbed Google US English (often default), pitch it up slightly for female chars
-            u.pitch = 1.1;
-            u.rate = 0.8;
-          }
-          
-          u.onend = resolve;
-          u.onerror = resolve;
-          window.speechSynthesis.speak(u);
-        });
       }
     } catch (e) {
-      console.error("TTS Error:", e);
+      console.warn("AI Speech failed, falling back to Browser TTS:", e);
+      audioData = null; // Ensure we trigger fallback
+    }
+
+    // Fallback: Browser TTS (if AI failed or returned null)
+    if (!audioData) {
+      console.log(`[Voice] Fallback to Browser TTS for ${voiceId}`);
+      
+      if (window.setCharSpeaking) window.setCharSpeaking(voiceId, true);
+
+      await new Promise((resolve) => {
+        const u = new SpeechSynthesisUtterance(text);
+        u.volume = voiceVolume;
+        const voices = window.speechSynthesis.getVoices();
+        
+        // Helper to find better voices (Google, Edge Natural, etc)
+        const findVoice = (terms) => voices.find(v => terms.some(t => v.name.toLowerCase().includes(t)));
+
+        // Simple mapping logic for browser voices
+        const isMale = ['narrator', 'danny', 'jake', 'character_generic_male'].includes(voiceId) || voiceId.includes('male');
+        if (isMale && !voiceId.includes('female')) {
+          u.voice = findVoice(['google us english', 'microsoft david', 'male']) || voices[0];
+          u.pitch = voiceId === 'narrator' ? 0.9 : 1.0;
+          u.rate = voiceId === 'narrator' ? 0.85 : 0.9;
+        } else {
+          u.voice = findVoice(['google us english', 'microsoft zira', 'female']) || voices[0];
+          u.pitch = 1.1;
+          u.rate = 0.8;
+        }
+        
+        u.onend = resolve;
+        u.onend = () => { if (window.setCharSpeaking) window.setCharSpeaking(voiceId, false); resolve(); };
+        u.onerror = resolve;
+        window.speechSynthesis.speak(u);
+      });
     }
 
     if (this.isPlaying) this.processQueue();
@@ -558,3 +633,4 @@ class VoiceEngine {
 }
 
 window.voice = new VoiceEngine();
+window.getCurrentMusicFilename = getCurrentMusicFilename;

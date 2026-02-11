@@ -364,7 +364,9 @@ function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, r
 5. [MUSIC: "name"] plays background music.
 6. Max 4 characters.
 7. [HIDE: "Char"] removes character. [HIDE: "All"] removes everyone.
-8. Sprites are STICKY. Only tag on change.`;
+8. Sprites are STICKY. Only tag on change.
+9. [FX: "shake"|"flash"] for visual effects.
+10. STRICTLY format dialogue as Name: "Speech". Do not use prose.`;
 
   return visualPrompt;
 }
@@ -502,7 +504,8 @@ function buildEnforcementRules({ stateInjection, loreInjection, advancedPromptCo
 1. DO NOT speak for the user.
 2. Maintain distinct personalities.
 3. Ensure each character's voice remains consistent.
-4. Manage the stage. If a character leaves, use [HIDE: Name].${stateInjection}${loreInjection}${advancedPromptContent ? `\n\n${advancedPromptContent}` : ''}`;
+4. Manage the stage. If a character leaves, use [HIDE: Name].
+5. Dialogue MUST be in script format (Name: "Speech").${stateInjection}${loreInjection}${advancedPromptContent ? `\n\n${advancedPromptContent}` : ''}`;
 }
 
 /**
@@ -670,18 +673,19 @@ function getVoiceBuckets(voiceBucketsPath) {
 /* ------------------------------ VOICE ASSIGNMENT ------------------------- */
 
 function getVoiceMap(voiceMapPath, botFilesPath) {
-  const map = readJsonSafe(voiceMapPath, {
-    // Default seeds (preserve your existing hardcoded preferences)
+  // 1. Hardcoded defaults
+  let map = {
     narrator: 0,
     jessica: 10,
     danny: 20,
     jake: 30,
     natasha: 40,
     suzie: 50,
-    character_generic: 5
-  });
+    character_generic_male: 5,
+    character_generic_female: 0
+  };
 
-  // Override with voice.txt from character folders if available
+  // 2. Override with voice.txt (Character Defaults)
   if (botFilesPath) {
     try {
       const charDir = path.join(botFilesPath, 'characters');
@@ -702,6 +706,15 @@ function getVoiceMap(voiceMapPath, botFilesPath) {
       }
     } catch (e) { /* ignore scan errors */ }
   }
+
+  // 3. Override with User Settings (voice_map.json)
+  const userMap = readJsonSafe(voiceMapPath, {});
+  map = { ...map, ...userMap };
+
+  // Safety: Ensure system keys exist even if userMap overwrote them with undefined
+  if (map.character_generic_male === undefined) map.character_generic_male = 5;
+  if (map.character_generic_female === undefined) map.character_generic_female = 0;
+
   return map;
 }
 
@@ -1002,11 +1015,20 @@ module.exports = function registerIpcHandlers(paths) {
       }
     }
 
+    let spriteSizes = {};
+    try {
+      const raw = readTextSafe(path.join(botFilesPath, 'sprite_size.txt'), '{}');
+      if (raw.trim()) spriteSizes = JSON.parse(raw);
+    } catch (e) {
+      console.warn('Failed to parse sprite_size.txt', e);
+    }
+
     return {
       personality: readBot('personality.txt'),
       scenario: readBot('scenario.txt'),
       initial: readBot('initial.txt'),
       characters,
+      spriteSizes,
     };
   });
 
@@ -1432,7 +1454,8 @@ Output a JSON object keyed by character name containing these fields.`;
       jake: 'Brian',       // British Male (The classic "Streamer" voice, fits a nerd archetype)
       natasha: 'Amy',      // British Female (Sophisticated)
       suzie: 'Kimberly',   // Higher pitch US Female
-      character_generic: 'Joanna' 
+      character_generic_male: 'Joey',
+      character_generic_female: 'Joanna'
     };
 
     const seVoice = SE_VOICE_MAP[voiceId] || 'Joanna';
@@ -1463,6 +1486,17 @@ Output a JSON object keyed by character name containing these fields.`;
     if (piperError) throw piperError;
     throw new Error("Audio generation failed (Piper missing/broken and StreamElements unreachable).");
   });
+
+  /**
+   * Clean messages for API consumption.
+   * Removes internal fields like 'swipes', 'swipeId' that would confuse the LLM.
+   */
+  function cleanMessagesForApi(messages) {
+    return messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+  }
 
   /**
    * Main chat send:
@@ -1513,7 +1547,7 @@ Output a JSON object keyed by character name containing these fields.`;
 
     // Trim history to context budget
     const maxContext = Number(config.maxContext) || 128000;
-    const finalMessages = applyContextWindow(messagesCopy, { maxContext, systemSuffix });
+    const finalMessages = applyContextWindow(cleanMessagesForApi(messagesCopy), { maxContext, systemSuffix });
 
     const webContents = event.sender;
 

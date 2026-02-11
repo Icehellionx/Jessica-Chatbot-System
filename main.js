@@ -43,6 +43,8 @@ const paths = {
   advancedPromptPath: path.join(__dirname, 'bot', 'files', 'advanced_prompt.txt'),
   characterStatePath: path.join(userDataPath, 'character_state.json'),
   lorebookPath: path.join(userDataPath, 'aura_lorebook.json'),
+  voiceMapPath: path.join(userDataPath, 'voice_map.json'),
+  voiceBucketsPath: path.join(userDataPath, 'voice_buckets.json'),
 };
 
 /* ------------------------------ DIR SETUP -------------------------------- */

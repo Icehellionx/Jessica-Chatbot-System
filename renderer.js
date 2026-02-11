@@ -109,9 +109,48 @@ function createMessageElement(role, rawText, index) {
       window.messages.splice(index);
       renderChat();
       await saveCurrentChatState();
+      window.refocusInput();
     };
 
     msgDiv.appendChild(deleteBtn);
+  }
+
+  // Branching / Swiping UI
+  if (window.messages[index] && window.messages[index].swipes && window.messages[index].swipes.length > 1) {
+    const msg = window.messages[index];
+    const navDiv = document.createElement('div');
+    navDiv.className = 'msg-nav';
+
+    const currentIdx = msg.swipeId || 0;
+    const total = msg.swipes.length;
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'msg-nav-btn';
+    prevBtn.textContent = '<';
+    prevBtn.disabled = currentIdx === 0;
+    prevBtn.onclick = () => swapMessageVersion(index, currentIdx - 1);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'msg-nav-btn';
+    nextBtn.textContent = '>';
+    nextBtn.disabled = currentIdx === total - 1;
+    nextBtn.onclick = () => swapMessageVersion(index, currentIdx + 1);
+
+    const label = document.createElement('span');
+    label.textContent = `${currentIdx + 1} / ${total}`;
+
+    const delBranchBtn = document.createElement('button');
+    delBranchBtn.className = 'msg-nav-btn';
+    delBranchBtn.innerHTML = '🗑️';
+    delBranchBtn.title = 'Delete this branch';
+    delBranchBtn.style.marginLeft = 'auto'; // Push to right
+    delBranchBtn.onclick = () => deleteSwipe(index);
+
+    navDiv.appendChild(prevBtn);
+    navDiv.appendChild(label);
+    navDiv.appendChild(nextBtn);
+    navDiv.appendChild(delBranchBtn);
+    msgDiv.appendChild(navDiv);
   }
 
   return { msgDiv, contentDiv };
@@ -317,12 +356,24 @@ function renderChat() {
 
     // Add reroll button ONLY on the last assistant message
     if (index === window.messages.length - 1 && msg.role === 'assistant') {
-      const rerollBtn = document.createElement('button');
-      rerollBtn.className = 'msg-reroll-btn';
-      rerollBtn.innerHTML = '↻';
-      rerollBtn.title = 'Reroll this message';
-      rerollBtn.onclick = () => regenerateResponse();
-      msgDiv.appendChild(rerollBtn);
+      const actionsDiv = document.createElement('div');
+      actionsDiv.style.cssText = 'float:right; display:flex; align-items:center;';
+
+      const redoBtn = document.createElement('button');
+      redoBtn.className = 'msg-action-btn';
+      redoBtn.innerHTML = '↻';
+      redoBtn.title = 'Redo (Replace current)';
+      redoBtn.onclick = () => regenerateResponse({ replace: true });
+
+      const branchBtn = document.createElement('button');
+      branchBtn.className = 'msg-action-btn';
+      branchBtn.innerHTML = '⑂'; // Branch icon
+      branchBtn.title = 'Branch (Create new)';
+      branchBtn.onclick = () => regenerateResponse({ replace: false });
+
+      actionsDiv.appendChild(redoBtn);
+      actionsDiv.appendChild(branchBtn);
+      msgDiv.appendChild(actionsDiv);
     }
   });
 
@@ -371,7 +422,20 @@ function buildSystemPrompt(sceneCharacters) {
     systemContent += `\n\n[Character: ${realName}]\n${window.botInfo.characters[realName]}`;
 
     // If mentioned but not visible, hint the model
-    if (!activeSprites.has(nameLower)) {
+    if (activeSprites.has(nameLower)) {
+      // Webbing: Tell AI what the character currently looks like (Mood)
+      const img = activeSprites.get(nameLower);
+      if (img && img.src) {
+        // Extract filename: "bot-resource://sprites/Jessica/happy.png" -> "happy"
+        try {
+          const filename = decodeURIComponent(img.src.split('bot-resource://')[1] || '');
+          const base = filename.split(/[/\\]/).pop().split('.')[0]; // "happy"
+          // Remove char name if present (e.g. "jessica_happy" -> "happy")
+          const mood = base.toLowerCase().replace(nameLower, '').replace(/^[_\-\s]+/, '') || 'Default';
+          systemContent += `\n(Visual State: ${realName} is currently showing expression: "${mood}")`;
+        } catch (e) {}
+      }
+    } else {
       systemContent += `\n(System Note: ${realName} is not currently visible. If they are entering the scene, you MUST output [SPRITE: ${realName}] at the start.)`;
     }
   }
@@ -392,6 +456,20 @@ function buildSystemPrompt(sceneCharacters) {
 
   // Replace placeholder
   systemContent = systemContent.replace(/{{user}}/g, window.userPersona.name);
+
+  // --- SCENE AWARENESS (Webbing) ---
+  // Inject current background, music, and time so the AI knows the "Vibe"
+  const bgSrc = $('vn-bg')?.src || '';
+  let location = 'Unknown';
+  if (bgSrc.includes('bot-resource://')) {
+    const bgName = decodeURIComponent(bgSrc.split('bot-resource://')[1]);
+    location = bgName.split(/[/\\]/).pop().split('.')[0].replace(/[_-]/g, ' ');
+  }
+
+  const musicName = window.getCurrentMusicFilename ? window.getCurrentMusicFilename() : '';
+  const musicInfo = musicName ? `\nBackground Music: "${musicName.split(/[/\\]/).pop().split('.')[0].replace(/[_-]/g, ' ')}"` : '';
+
+  systemContent += `\n\n[CURRENT SCENE STATE]\nLocation: ${location}${musicInfo}`;
 
   // Summary
   if (window.chatSummary?.content) {
@@ -619,6 +697,9 @@ async function handleSend() {
 
     window.messages.push({ role: 'assistant', content: rawResponse });
     await saveCurrentChatState();
+    
+    // Re-render to ensure the new message gets its buttons (Delete, Branch, etc.)
+    renderChat();
 
     // Character evolution: Run AFTER the turn is secure to avoid race conditions
     if (turnCount > 0 && turnCount % 5 === 0) {
@@ -649,26 +730,103 @@ async function handleSend() {
   window.refocusInput();
 }
 
-async function regenerateResponse() {
-  if (!window.messages.length) return;
+async function swapMessageVersion(msgIndex, swipeIndex) {
+  const msg = window.messages[msgIndex];
+  if (!msg || !msg.swipes || !msg.swipes[swipeIndex]) return;
 
-  // Remove last assistant
-  const last = window.messages[window.messages.length - 1];
-  if (last?.role === 'assistant') window.messages.pop();
+  // Update state
+  msg.swipeId = swipeIndex;
+  msg.content = msg.swipes[swipeIndex];
+
+  // Re-render
+  renderChat();
+  
+  // Process visuals for the swapped message (so background/sprites update to match)
+  const { missing } = processVisualTags(msg.content);
+  if (missing?.length) handleMissingVisuals(missing);
+  
+  await saveCurrentChatState();
+}
+
+async function deleteSwipe(msgIndex) {
+  const msg = window.messages[msgIndex];
+  if (!msg || !msg.swipes || msg.swipes.length <= 1) return;
+
+  const yes = await window.showConfirmModal('Delete Branch', 'Are you sure you want to delete this version of the message?');
+  if (!yes) return;
+
+  const currentIdx = msg.swipeId || 0;
+  
+  // Remove current swipe
+  msg.swipes.splice(currentIdx, 1);
+  
+  // Adjust index to be safe
+  msg.swipeId = Math.max(0, Math.min(currentIdx, msg.swipes.length - 1));
+  msg.content = msg.swipes[msg.swipeId];
 
   renderChat();
+  
+  // Update visuals for the new current swipe
+  const { missing } = processVisualTags(msg.content);
+  if (missing?.length) handleMissingVisuals(missing);
 
-  // Reroll uses last user msg for scene context
-  const lastUser = window.messages[window.messages.length - 1];
-  const text = lastUser?.role === 'user' ? lastUser.content : '';
-  const sceneCharacters = getSceneContext(text);
-
-  const payload = buildPayload(sceneCharacters);
-  const rawResponse = await streamChat(payload, sceneCharacters);
-
-  window.messages.push({ role: 'assistant', content: rawResponse });
   await saveCurrentChatState();
-  window.refocusInput();
+}
+
+async function regenerateResponse({ replace } = { replace: false }) {
+  if (!window.messages.length) return;
+
+  try {
+    // Remove last assistant
+    const last = window.messages[window.messages.length - 1];
+    let previousSwipes = [];
+    let targetSwipeIndex = 0;
+    
+    if (last?.role === 'assistant') {
+      // Preserve history of the message we are replacing
+      previousSwipes = last.swipes || [last.content];
+      targetSwipeIndex = last.swipeId !== undefined ? last.swipeId : (previousSwipes.length - 1);
+      window.messages.pop();
+    }
+
+    renderChat();
+
+    // Reroll uses last user msg for scene context
+    const lastUser = window.messages[window.messages.length - 1];
+    const text = lastUser?.role === 'user' ? lastUser.content : '';
+    const sceneCharacters = getSceneContext(text);
+
+    const payload = buildPayload(sceneCharacters);
+    const rawResponse = await streamChat(payload, sceneCharacters);
+
+    let newSwipes;
+    let newSwipeId;
+
+    if (replace) {
+      // Overwrite current swipe
+      newSwipes = [...previousSwipes];
+      newSwipes[targetSwipeIndex] = rawResponse;
+      newSwipeId = targetSwipeIndex;
+    } else {
+      // Append new swipe (Branch)
+      newSwipes = [...previousSwipes, rawResponse];
+      newSwipeId = newSwipes.length - 1;
+    }
+
+    window.messages.push({
+      role: 'assistant',
+      content: rawResponse,
+      swipes: newSwipes,
+      swipeId: newSwipeId
+    });
+    
+    await saveCurrentChatState();
+  } catch (error) {
+    console.error('Regenerate Error:', error);
+    alert(`Failed to regenerate response: ${error?.message || 'Unknown error'}`);
+  } finally {
+    window.refocusInput();
+  }
 }
 
 /* ------------------------------ EVENTS ----------------------------------- */
@@ -721,7 +879,7 @@ document.addEventListener('mouseup', () => {
 
 async function init() {
   setupVisuals();
-  setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse });
+  setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse, swapMessageVersion });
 
   setupVolumeControls();
 
@@ -738,6 +896,9 @@ async function init() {
   const hasKeys = config?.apiKeys && Object.keys(config.apiKeys).length > 0;
 
   window.botInfo = await window.api.getBotInfo();
+  if (window.setSpriteOverrides && window.botInfo.spriteSizes) {
+    window.setSpriteOverrides(window.botInfo.spriteSizes);
+  }
   window.userPersona = await window.api.getPersona();
   window.chatSummary = await window.api.getSummary();
   window.imageManifest = await window.api.getImageManifest();
