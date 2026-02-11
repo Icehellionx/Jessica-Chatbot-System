@@ -29,14 +29,16 @@ function setupVolumeControls() {
   volumeContainer.id = 'volume-controls';
   volumeContainer.style.cssText = `
     display:flex;
-    align-items:center;
+    align-items:flex-end;
     margin-right:15px;
     gap: 10px;
+    flex-wrap:wrap;
   `;
 
   // Helper to create a labeled group (Label on top, controls below)
   const createGroup = (labelText, btn, slider) => {
     const group = document.createElement('div');
+    group.className = 'toolbar-group';
     group.style.cssText = `
       display:flex;
       flex-direction:column;
@@ -44,8 +46,9 @@ function setupVolumeControls() {
     `;
     
     const label = document.createElement('span');
+    label.className = 'toolbar-label';
     label.textContent = labelText;
-    label.style.cssText = 'color:#ccc; font-size:10px; font-family:sans-serif; margin-bottom:2px;';
+    label.style.cssText = 'color:#ccc; font-size:10px; font-family:sans-serif; margin-bottom:2px; text-transform:uppercase; letter-spacing:0.5px; line-height:1;';
     
     const row = document.createElement('div');
     row.style.cssText = 'display:flex; align-items:center;';
@@ -62,16 +65,8 @@ function setupVolumeControls() {
   muteBtn.id = 'mute-btn';
   muteBtn.type = 'button';
   muteBtn.textContent = isMuted ? '🔇' : '🔊';
-  muteBtn.style.cssText = `
-    background:none;
-    border:none;
-    color:#ddd;
-    font-size:16px;
-    cursor:pointer;
-    margin-right:5px;
-    padding:0;
-    line-height:1;
-  `;
+  muteBtn.className = 'tool-btn';
+  muteBtn.style.marginRight = '5px';
 
   const volumeSlider = document.createElement('input');
   volumeSlider.id = 'volume-slider';
@@ -92,7 +87,8 @@ function setupVolumeControls() {
   voiceBtn.type = 'button';
   voiceBtn.textContent = '🗣️';
   voiceBtn.title = 'Play/Stop Voice';
-  voiceBtn.style.cssText = muteBtn.style.cssText;
+  voiceBtn.className = 'tool-btn';
+  voiceBtn.style.marginRight = '5px';
 
   const voiceSlider = document.createElement('input');
   voiceSlider.id = 'voice-slider';

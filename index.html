@@ -197,8 +197,24 @@
       gap: 8px;
       justify-content: flex-end;
       border-bottom: 1px solid var(--border);
-      align-items: center;
+      align-items: flex-end;
+      flex-wrap: wrap;
       user-select: none;
+    }
+
+    .toolbar-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .toolbar-label {
+      color: #ccc;
+      font-size: 10px;
+      font-family: sans-serif;
+      margin-bottom: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 1;
     }
 
     .tool-btn{
@@ -406,7 +422,10 @@
 
   <div id="main-body">
     <div id="toolbar" role="toolbar" aria-label="Chat toolbar">
-      <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Theater</span>
+        <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
+      </div>
       <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
       <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
       <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
