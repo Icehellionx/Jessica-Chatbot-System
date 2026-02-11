@@ -49,11 +49,18 @@ window.refocusInput = () => {
   const input = $('user-input');
   if (!input) return;
 
-  // Blur/focus helps Electron when focus gets “stuck” after modals
+  // Blur/focus helps Electron when focus gets "stuck" after modals.
+  // Use two attempts — the first catches fast transitions, the second
+  // catches slower Electron focus-chain recovery (e.g. after confirm modals).
   input.blur();
+  input.disabled = false;
   setTimeout(() => {
-    input.disabled = false;
     input.focus();
+    // Backup: if the first focus didn't stick (document.activeElement !== input),
+    // try once more after Electron's focus chain has fully settled.
+    setTimeout(() => {
+      if (document.activeElement !== input) input.focus();
+    }, 100);
   }, 50);
 };
 
@@ -108,6 +115,7 @@ function createMessageElement(role, rawText, index) {
       window.messages.splice(index);
       renderChat();
       await saveCurrentChatState();
+      window.refocusInput();
     };
 
     msgDiv.appendChild(deleteBtn);
@@ -618,10 +626,16 @@ async function regenerateResponse() {
   const sceneCharacters = getSceneContext(text);
 
   const payload = buildPayload(sceneCharacters);
-  const rawResponse = await streamChat(payload, sceneCharacters);
 
-  window.messages.push({ role: 'assistant', content: rawResponse });
-  await saveCurrentChatState();
+  try {
+    const rawResponse = await streamChat(payload, sceneCharacters);
+    window.messages.push({ role: 'assistant', content: rawResponse });
+    await saveCurrentChatState();
+  } catch (error) {
+    console.error('Regenerate Error:', error);
+    alert(`Failed to regenerate response: ${error?.message || 'Unknown error'}`);
+  }
+
   window.refocusInput();
 }
 
