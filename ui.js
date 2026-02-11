@@ -85,6 +85,7 @@
       renderChat,
       saveCurrentChatState,
       regenerateResponse,
+      swapMessageVersion,
     } = callbacks;
 
     // -------- DOM refs used often --------
@@ -121,8 +122,13 @@
     const saveChatBtn = $("save-chat-btn");
     const loadChatBtn = $("load-chat-btn");
     const resetChatBtn = $("reset-chat-btn");
+    const hideUiBtn = $("hide-ui-btn");
     const undoBtn = $("undo-btn");
     const redoBtn = $("redo-btn");
+    const treeBtn = $("tree-btn");
+    const treeModal = $("tree-modal");
+    const closeTreeBtn = $("close-tree-btn");
+    const treeViewer = $("tree-viewer");
 
     const keysList = $("keys-list");
     const savedChatsList = $("saved-chats-list");
@@ -310,20 +316,41 @@
     // Edit Voice Map
     editVoicesBtn?.addEventListener("click", async () => {
       const map = await window.api.getVoiceMap();
+      console.log("[UI] Loaded Voice Map:", map);
       voiceList.innerHTML = "";
       
-      Object.keys(map).sort().forEach(char => {
+      const systemKeys = ['narrator', 'character_generic_male', 'character_generic_female'];
+      const deprecatedKeys = ['character_generic'];
+      const charKeys = Object.keys(map).filter(k => !systemKeys.includes(k) && !deprecatedKeys.includes(k)).sort();
+
+      const renderRow = (char) => {
         const row = document.createElement("div");
         row.className = "form-group";
         row.style.cssText = "display:flex; align-items:center; gap:10px; margin-bottom:10px;";
         
         row.innerHTML = `
-          <label style="flex:1; margin:0;">${escapeHtml(char)}</label>
+          <label style="flex:1; margin:0; font-family:monospace;">${escapeHtml(char)}</label>
           <input type="number" class="voice-id-input" data-char="${escapeAttr(char)}" value="${map[char]}" style="width:80px;">
           <button type="button" class="tool-btn test-voice-btn" data-char="${escapeAttr(char)}">Test</button>
         `;
         voiceList.appendChild(row);
-      });
+      };
+
+      if (systemKeys.length > 0) {
+        const h = document.createElement('h3');
+        h.style.cssText = "margin: 0 0 10px; border-bottom: 1px solid #444; font-size: 0.9em; color: var(--accent);";
+        h.textContent = "System Voices";
+        voiceList.appendChild(h);
+        systemKeys.forEach(k => { if(map[k] !== undefined) renderRow(k); });
+      }
+
+      if (charKeys.length > 0) {
+        const h = document.createElement('h3');
+        h.style.cssText = "margin: 20px 0 10px; border-bottom: 1px solid #444; font-size: 0.9em; color: var(--accent);";
+        h.textContent = "Characters";
+        voiceList.appendChild(h);
+        charKeys.forEach(k => renderRow(k));
+      }
       
       show(voiceModal);
     });
@@ -549,6 +576,15 @@
       await initializeChat();
     });
 
+    // Hide UI / Theater Mode
+    hideUiBtn?.addEventListener("click", () => {
+      document.body.classList.toggle("ui-hidden");
+    });
+    // Click panel to restore if hidden
+    $("vn-panel")?.addEventListener("click", () => {
+      if (document.body.classList.contains("ui-hidden")) document.body.classList.remove("ui-hidden");
+    });
+
     undoBtn?.addEventListener("click", () => {
       if (!window.messages || window.messages.length === 0) return;
 
@@ -566,6 +602,60 @@
     });
 
     redoBtn?.addEventListener("click", () => regenerateResponse());
+
+    // ---------------------------
+    // Tree View
+    // ---------------------------
+
+    treeBtn?.addEventListener("click", () => {
+      renderTreeView();
+      show(treeModal);
+    });
+
+    closeTreeBtn?.addEventListener("click", () => hide(treeModal));
+
+    function renderTreeView() {
+      if (!treeViewer) return;
+      treeViewer.innerHTML = "";
+
+      if (!window.messages || window.messages.length === 0) {
+        treeViewer.innerHTML = "<p>No messages yet.</p>";
+        return;
+      }
+
+      window.messages.forEach((msg, index) => {
+        const levelDiv = document.createElement("div");
+        levelDiv.className = "tree-level";
+
+        // If message has swipes, show them all
+        const swipes = msg.swipes && msg.swipes.length > 0 ? msg.swipes : [msg.content];
+        const activeIdx = msg.swipeId || 0;
+
+        swipes.forEach((content, swipeIdx) => {
+          const node = document.createElement("div");
+          node.className = `tree-node ${msg.role}`;
+          if (swipeIdx === activeIdx) node.classList.add("active");
+
+          // Truncate content
+          const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+          node.textContent = `[${msg.role}] ${preview}`;
+          
+          node.title = content; // Full text on hover
+
+          node.onclick = async () => {
+            if (swipeIdx === activeIdx) return; // Already active
+            if (swapMessageVersion) {
+              await swapMessageVersion(index, swipeIdx);
+              renderTreeView(); // Re-render to update active state
+            }
+          };
+
+          levelDiv.appendChild(node);
+        });
+
+        treeViewer.appendChild(levelDiv);
+      });
+    }
 
     // ---------------------------
     // Keys list interactions (delegated)

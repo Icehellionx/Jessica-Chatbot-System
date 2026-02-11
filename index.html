@@ -169,6 +169,26 @@
     }
     .message:hover .msg-delete-btn{ display: flex; }
 
+    /* --- Message Navigation (Branching) --- */
+    .msg-nav {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.75em; color: var(--text-muted);
+      margin-top: 6px; user-select: none;
+    }
+    .msg-nav-btn {
+      background: transparent; border: 1px solid var(--border-2); color: var(--text-dim);
+      border-radius: 4px; cursor: pointer; padding: 2px 8px; font-size: 1em;
+    }
+    .msg-nav-btn:hover { background: var(--panel-3); color: #fff; }
+    .msg-nav-btn:disabled { opacity: 0.3; cursor: default; border-color: transparent; }
+
+    /* --- Message Actions --- */
+    .msg-action-btn {
+      background: none; border: none; color: #888; cursor: pointer;
+      font-size: 16px; margin-left: 5px; padding: 0 5px;
+    }
+    .msg-action-btn:hover { color: var(--accent); }
+
     /* --- Toolbar --- */
     #toolbar{
       padding: var(--pad-1);
@@ -327,6 +347,52 @@
       #resizer{ display:none; }
       #main-body{ width:100%; height:60vh; }
     }
+
+    /* --- Tree View --- */
+    .tree-level {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      position: relative;
+      justify-content: center;
+    }
+    .tree-node {
+      background: #333;
+      border: 1px solid #555;
+      border-radius: 8px;
+      padding: 10px;
+      width: 200px;
+      font-size: 0.8em;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s;
+      opacity: 0.6;
+    }
+    .tree-node:hover { border-color: var(--accent); opacity: 0.8; }
+    .tree-node.active {
+      border-color: var(--accent);
+      background: #004578;
+      opacity: 1;
+      box-shadow: 0 0 10px rgba(0,120,212,0.3);
+    }
+    .tree-node.user { border-top: 3px solid #005a9e; }
+    .tree-node.assistant { border-top: 3px solid #3b3b3b; }
+    .tree-connector {
+      position: absolute;
+      top: -20px;
+      bottom: -20px;
+      width: 2px;
+      background: #555;
+      left: 50%;
+      z-index: -1;
+    }
+
+    /* --- Theater Mode (Hide UI) --- */
+    body.ui-hidden #main-body { display: none !important; }
+    body.ui-hidden #resizer { display: none !important; }
+    body.ui-hidden #vn-panel { width: 100% !important; cursor: pointer; }
+    /* Show a hint when hidden */
+    body.ui-hidden #vn-panel::after { content: "Click to restore UI"; position: absolute; bottom: 10px; right: 10px; color: rgba(255,255,255,0.5); font-size: 12px; pointer-events: none; }
   </style>
 </head>
 
@@ -340,9 +406,11 @@
 
   <div id="main-body">
     <div id="toolbar" role="toolbar" aria-label="Chat toolbar">
+      <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
       <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
       <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
       <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
+      <button id="tree-btn" class="tool-btn" type="button" title="Branch Tree">🌳 Tree</button>
       <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️ Options</button>
     </div>
 
@@ -582,6 +650,16 @@
       <div class="modal-footer">
         <button id="save-lorebook-btn" class="tool-btn primary" type="button">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Tree Modal -->
+  <div id="tree-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tree-title">
+    <div class="modal-content" style="width: 90%; max-width: 1000px; height: 90vh;">
+      <button id="close-tree-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="tree-title">Conversation Tree</h2>
+      <p style="color:var(--text-muted); font-size:0.9em;">Click a node to switch to that version.</p>
+      <div id="tree-viewer" style="padding: 20px; display: flex; flex-direction: column; align-items: center;"></div>
     </div>
   </div>
 

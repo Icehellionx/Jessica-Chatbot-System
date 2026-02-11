@@ -1,0 +1,6 @@
+{
+  "natasha": {
+    "height": "103%",
+    "maxWidth": "none"
+  }
+}

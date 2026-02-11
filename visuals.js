@@ -33,6 +33,14 @@
 
   window.imageManifest = window.imageManifest || { backgrounds: {}, sprites: {}, splash: {}, music: {} };
 
+  // Character-specific sprite scaling/positioning tweaks
+  let spriteOverrides = {};
+
+  function setSpriteOverrides(overrides) {
+    if (!overrides) return;
+    spriteOverrides = { ...spriteOverrides, ...overrides };
+  }
+
   let debugMode = false;
   const debugLog = [];
 
@@ -139,7 +147,7 @@
 
   function setupVisuals() {
     ensureStyleOnce(
-      "vn-visuals-style",
+      "vn-visuals-style-v4", // Changed ID to force CSS update
       `
       /* Stage */
       #vn-panel {
@@ -192,6 +200,7 @@
 
         transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out;
         will-change: transform, opacity;
+        transform-origin: bottom center;
 
         margin: 0 -2%;
         transform: translateY(20px);
@@ -263,7 +272,7 @@
       #loading-overlay.active { opacity: 1; }
 
       /* Keep modals above overlays */
-      #setup-modal, #persona-modal, #options-modal, #summary-modal, #load-modal {
+      #setup-modal, #persona-modal, #options-modal, #summary-modal, #load-modal, #tree-modal {
         z-index: 10001;
       }
       #voice-modal, #confirm-modal, #lorebook-modal {
@@ -289,6 +298,34 @@
       .debug-error { color: #f55; }
       .debug-success { color: #5f5; }
       .debug-warn { color: #fa0; }
+
+      /* FX Animations */
+      @keyframes fx-shake {
+        0% { transform: translate(1px, 1px) rotate(0deg); }
+        10% { transform: translate(-1px, -2px) rotate(-1deg); }
+        20% { transform: translate(-3px, 0px) rotate(1deg); }
+        30% { transform: translate(3px, 2px) rotate(0deg); }
+        40% { transform: translate(1px, -1px) rotate(1deg); }
+        50% { transform: translate(-1px, 2px) rotate(-1deg); }
+        60% { transform: translate(-3px, 1px) rotate(0deg); }
+        70% { transform: translate(3px, 1px) rotate(-1deg); }
+        80% { transform: translate(-1px, -1px) rotate(1deg); }
+        90% { transform: translate(1px, 2px) rotate(0deg); }
+        100% { transform: translate(1px, -2px) rotate(-1deg); }
+      }
+      .fx-shake { animation: fx-shake 0.5s; }
+
+      @keyframes fx-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+      .fx-flash-overlay { position: absolute; inset: 0; background: white; z-index: 50; pointer-events: none; animation: fx-flash 0.5s forwards; }
+
+      /* Speaking Animation */
+      .character-sprite.speaking {
+        filter: brightness(1.1) drop-shadow(0 0 5px rgba(255,255,255,0.3));
+        transform: scale(1.05) !important;
+        transition: transform 0.1s ease-out, filter 0.1s ease-out;
+        z-index: 50;
+      }
+
       `
     );
   }
@@ -609,13 +646,9 @@
     }
 
     // Character-specific height tweak
-    if (charId.includes("natasha")) {
-      img.style.height = "103%";
-      img.style.maxWidth = "none";
-    } else {
-      img.style.height = "";
-      img.style.maxWidth = "";
-    }
+    const override = spriteOverrides[charId] || {};
+    img.style.height = override.height || "";
+    img.style.maxWidth = override.maxWidth || "";
 
     adjustSpriteOverlap();
     animateLayoutChanges(oldRects);
@@ -670,6 +703,43 @@
     }, 500);
   }
 
+  function setCharSpeaking(charName, isSpeaking) {
+    const name = String(charName || "").toLowerCase();
+    // Find sprite by fuzzy match
+    for (const [key, img] of activeSprites.entries()) {
+      if (key.includes(name) || name.includes(key)) {
+        if (isSpeaking) {
+          img.classList.add("speaking");
+        } else {
+          img.classList.remove("speaking");
+        }
+      }
+    }
+  }
+
+  // ---------------------------
+  // FX
+  // ---------------------------
+
+  function triggerEffect(name) {
+    const panel = $("vn-panel");
+    if (!panel) return;
+    const effect = String(name).toLowerCase().trim();
+
+    if (effect === "shake") {
+      panel.classList.remove("fx-shake");
+      void panel.offsetWidth; // trigger reflow
+      panel.classList.add("fx-shake");
+      if (debugMode) appendDebug("FX: Shake triggered", "info");
+    } else if (effect === "flash") {
+      const overlay = document.createElement("div");
+      overlay.className = "fx-flash-overlay";
+      panel.appendChild(overlay);
+      setTimeout(() => overlay.remove(), 600);
+      if (debugMode) appendDebug("FX: Flash triggered", "info");
+    }
+  }
+
   // ---------------------------
   // Tag Parsing
   // ---------------------------
@@ -682,6 +752,7 @@
     splash: /\[SPLASH:\s*([^\]]+)\]/gi,
     music: /\[MUSIC:\s*([^\]]+)\]/gi,
     hide: /\[HIDE:\s*([^\]]+)\]/gi,
+    fx: /\[FX:\s*([^\]]+)\]/gi,
   };
 
   function stripVisualTags(text) {
@@ -694,7 +765,8 @@
       .replace(new RegExp(TAG_PATTERNS.sprite.source, "gi"), "")
       .replace(new RegExp(TAG_PATTERNS.splash.source, "gi"), "")
       .replace(new RegExp(TAG_PATTERNS.music.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.hide.source, "gi"), "");
+      .replace(new RegExp(TAG_PATTERNS.hide.source, "gi"), "")
+      .replace(new RegExp(TAG_PATTERNS.fx.source, "gi"), "");
 
     return out.replace(/\n{3,}/g, "\n\n").trim();
   }
@@ -717,6 +789,7 @@
     collect("splash");
     collect("music");
     collect("hide");
+    collect("fx");
 
     matches.sort((a, b) => a.index - b.index);
 
@@ -818,6 +891,11 @@
         hideSprite(v);
         if (debugMode) appendDebug(`  -> Hiding: ${v}`);
       }
+
+      if (m.type === "fx") {
+        if (!v) continue;
+        triggerEffect(v);
+      }
     }
 
     return { text: stripVisualTags(input), stats: { spriteUpdated }, missing };
@@ -842,9 +920,12 @@
   window.showSplash = showSplash;
   window.hideSplash = hideSplash;
 
+  window.triggerEffect = triggerEffect;
+  window.setCharSpeaking = setCharSpeaking;
   window.stripVisualTags = stripVisualTags;
   window.processVisualTags = processVisualTags;
   window.setVisualDebugMode = setVisualDebugMode;
+  window.setSpriteOverrides = setSpriteOverrides;
 
   // If other scripts relied on activeSprites directly, this keeps compatibility:
   window.__activeSprites = activeSprites;
