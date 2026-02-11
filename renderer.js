@@ -49,18 +49,12 @@ window.refocusInput = () => {
   const input = $('user-input');
   if (!input) return;
 
-  // Blur/focus helps Electron when focus gets "stuck" after modals.
-  // Use two attempts — the first catches fast transitions, the second
-  // catches slower Electron focus-chain recovery (e.g. after confirm modals).
+  // Blur/focus helps Electron when focus gets “stuck” after modals
   input.blur();
-  input.disabled = false;
   setTimeout(() => {
+    input.disabled = false;
+    window.focus();
     input.focus();
-    // Backup: if the first focus didn't stick (document.activeElement !== input),
-    // try once more after Electron's focus chain has fully settled.
-    setTimeout(() => {
-      if (document.activeElement !== input) input.focus();
-    }, 100);
   }, 50);
 };
 
@@ -115,7 +109,6 @@ function createMessageElement(role, rawText, index) {
       window.messages.splice(index);
       renderChat();
       await saveCurrentChatState();
-      window.refocusInput();
     };
 
     msgDiv.appendChild(deleteBtn);
@@ -162,6 +155,29 @@ function getMood(text) {
   }
 
   return best;
+}
+
+/* ------------------------------ ASSET GENERATION ------------------------- */
+
+async function handleMissingVisuals(missing) {
+  if (!missing || !missing.length) return;
+  
+  for (const m of missing) {
+    if (m.type === 'bg') {
+      const notice = appendMessage('system', `🎨 Generating background: "${m.value}"...`, undefined);
+      try {
+        const newPath = await window.api.generateImage(m.value, 'bg');
+        if (newPath) {
+           changeBackground(newPath);
+           if (notice) notice.style.display = 'none'; // Hide notice on success
+        } else {
+           if (notice) notice.textContent = `⚠️ Failed to generate background: "${m.value}" (Is SD running?)`;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
 }
 
 /* ------------------------------ TITLE SCREEN ----------------------------- */
@@ -279,6 +295,15 @@ async function restoreChatState(state) {
   else playMusic(null);
 
   renderChat();
+
+  // Prime voice engine with the last assistant message so the button works immediately
+  if (window.voice && window.messages.length > 0) {
+    const lastMsg = window.messages[window.messages.length - 1];
+    if (lastMsg && lastMsg.role === 'assistant') {
+      window.voice.speak(lastMsg.content, getSceneContext(lastMsg.content));
+    }
+  }
+
   console.log('Chat state restored.');
 }
 
@@ -445,7 +470,12 @@ async function initializeChat() {
       else playMusic(null);
     }
 
-    processVisualTags(initialText);
+    const { missing } = processVisualTags(initialText);
+    if (missing?.length) await handleMissingVisuals(missing);
+
+    if (window.voice) {
+      window.voice.speak(initialText, getSceneContext(initialText));
+    }
 
     window.messages.push({ role: 'assistant', content: initialText.trim() });
     turnCount = 0;
@@ -535,7 +565,8 @@ async function streamChat(payload, sceneCharacters) {
     }
 
     // Execute visual tags first
-    const { stats } = processVisualTags(fullResponse);
+    const { stats, missing } = processVisualTags(fullResponse);
+    if (missing?.length) handleMissingVisuals(missing); // Async, don't await to keep UI responsive
 
     // If no sprites were explicitly updated (either no tags or invalid tags),
     // apply local mood heuristic to keep characters alive.
@@ -550,6 +581,10 @@ async function streamChat(payload, sceneCharacters) {
     // final render (tags stripped)
     contentDiv.innerHTML = parseMarkdown(stripVisualTags(fullResponse));
 
+    if (window.voice) {
+      window.voice.speak(fullResponse, sceneCharacters);
+    }
+
     return fullResponse.trim();
   } finally {
     if (removeListener) removeListener();
@@ -563,6 +598,9 @@ async function streamChat(payload, sceneCharacters) {
 async function handleSend() {
   const text = userInput.value.trim();
   if (!text) return;
+
+  // Stop any ongoing speech when user interrupts
+  if (window.voice) window.voice.stop();
 
   // UI: show user message immediately
   appendMessage('user', text, window.messages.length);
@@ -626,16 +664,10 @@ async function regenerateResponse() {
   const sceneCharacters = getSceneContext(text);
 
   const payload = buildPayload(sceneCharacters);
+  const rawResponse = await streamChat(payload, sceneCharacters);
 
-  try {
-    const rawResponse = await streamChat(payload, sceneCharacters);
-    window.messages.push({ role: 'assistant', content: rawResponse });
-    await saveCurrentChatState();
-  } catch (error) {
-    console.error('Regenerate Error:', error);
-    alert(`Failed to regenerate response: ${error?.message || 'Unknown error'}`);
-  }
-
+  window.messages.push({ role: 'assistant', content: rawResponse });
+  await saveCurrentChatState();
   window.refocusInput();
 }
 

@@ -1,0 +1,2276 @@
+Folder PATH listing
+Volume serial number is 3C21-99A4
+C:.
+|   ai_services.js
+|   audio.js
+|   index.html
+|   INSTALL.bat
+|   ipcHandlers.js
+|   main.js
+|   node.msi
+|   output.txt
+|   package-lock.json
+|   package.json
+|   preload.js
+|   renderer.js
+|   START.bat
+|   styles.css
+|   ui.js
+|   visuals.js
+|   
++---bot
+|   +---files
+|   |   |   advanced prompt.txt
+|   |   |   advanced_prompt.txt
+|   |   |   initial.txt
+|   |   |   initial_duo.txt
+|   |   |   personality.txt
+|   |   |   scenario.txt
+|   |   |   
+|   |   +---AURA
+|   |   |       AURA.js
+|   |   |       logic.js
+|   |   |       weights.js
+|   |   |       
+|   |   +---backgrounds
+|   |   |   |   bedroom_lights_high.png
+|   |   |   |   bedroom_lights_low.png
+|   |   |   |   cafe.png
+|   |   |   |   living_room.png
+|   |   |   |   outside_day.png
+|   |   |   |   outside_night.png
+|   |   |   |   
+|   |   |   \---generated
+|   |   |           gen_1770788261806_museum_interior.jpg
+|   |   |           
+|   |   +---characters
+|   |   |   +---Danny
+|   |   |   |       anxious.png
+|   |   |   |       default.png
+|   |   |   |       flirty.png
+|   |   |   |       happy.png
+|   |   |   |       mad.png
+|   |   |   |       personality.txt
+|   |   |   |       sad.png
+|   |   |   |       scared.png
+|   |   |   |       
+|   |   |   +---Jake
+|   |   |   |       anxious.png
+|   |   |   |       default.png
+|   |   |   |       flrity.png
+|   |   |   |       happy.png
+|   |   |   |       mad.png
+|   |   |   |       personality.txt
+|   |   |   |       sad.png
+|   |   |   |       
+|   |   |   +---Jessica
+|   |   |   |       anxious.png
+|   |   |   |       default.png
+|   |   |   |       flirty.png
+|   |   |   |       happy.png
+|   |   |   |       mad.png
+|   |   |   |       personality.txt
+|   |   |   |       sad.png
+|   |   |   |       scared.png
+|   |   |   |       
+|   |   |   +---Natasha
+|   |   |   |       anxious.png
+|   |   |   |       default.png
+|   |   |   |       flirty.png
+|   |   |   |       happy.png
+|   |   |   |       mad.png
+|   |   |   |       personality.txt
+|   |   |   |       sad.png
+|   |   |   |       scared.png
+|   |   |   |       
+|   |   |   \---Suzie
+|   |   |           anxious.png
+|   |   |           default.png
+|   |   |           flirty.png
+|   |   |           happy.png
+|   |   |           mad.png
+|   |   |           personality.txt
+|   |   |           sad.png
+|   |   |           scared.png
+|   |   |           
+|   |   +---music
+|   |   |       action.mp3
+|   |   |       comedy.mp3
+|   |   |       default.mp3
+|   |   |       main_theme.mp3
+|   |   |       romance_confession.mp3
+|   |   |       sad.mp3
+|   |   |       tender_soft.mp3
+|   |   |       
+|   |   +---splash
+|   |   |       Natasha_enters_cafe.png
+|   |   |       
+|   |   +---sprites
+|   |   \---title
+|   |           title_screen.png
+|   |           
+|   \---tools
+|       \---piper
+|           |   en_US-libritts_r-medium.onnx
+|           |   en_US-libritts_r-medium.onnx.json
+|           |   espeak-ng.dll
+|           |   libtashkeel_model.ort
+|           |   onnxruntime.dll
+|           |   onnxruntime_providers_shared.dll
+|           |   piper.exe
+|           |   piper_phonemize.dll
+|           |   
+|           +---espeak-ng-data
+|           |   |   af_dict
+|           |   |   am_dict
+|           |   |   an_dict
+|           |   |   ar_dict
+|           |   |   as_dict
+|           |   |   az_dict
+|           |   |   ba_dict
+|           |   |   be_dict
+|           |   |   bg_dict
+|           |   |   bn_dict
+|           |   |   bpy_dict
+|           |   |   bs_dict
+|           |   |   ca_dict
+|           |   |   chr_dict
+|           |   |   cmn_dict
+|           |   |   cs_dict
+|           |   |   cv_dict
+|           |   |   cy_dict
+|           |   |   da_dict
+|           |   |   de_dict
+|           |   |   el_dict
+|           |   |   en_dict
+|           |   |   eo_dict
+|           |   |   es_dict
+|           |   |   et_dict
+|           |   |   eu_dict
+|           |   |   fa_dict
+|           |   |   fi_dict
+|           |   |   fr_dict
+|           |   |   ga_dict
+|           |   |   gd_dict
+|           |   |   gn_dict
+|           |   |   grc_dict
+|           |   |   gu_dict
+|           |   |   hak_dict
+|           |   |   haw_dict
+|           |   |   he_dict
+|           |   |   hi_dict
+|           |   |   hr_dict
+|           |   |   ht_dict
+|           |   |   hu_dict
+|           |   |   hy_dict
+|           |   |   ia_dict
+|           |   |   id_dict
+|           |   |   intonations
+|           |   |   io_dict
+|           |   |   is_dict
+|           |   |   it_dict
+|           |   |   ja_dict
+|           |   |   jbo_dict
+|           |   |   ka_dict
+|           |   |   kk_dict
+|           |   |   kl_dict
+|           |   |   kn_dict
+|           |   |   kok_dict
+|           |   |   ko_dict
+|           |   |   ku_dict
+|           |   |   ky_dict
+|           |   |   la_dict
+|           |   |   lb_dict
+|           |   |   lfn_dict
+|           |   |   lt_dict
+|           |   |   lv_dict
+|           |   |   mi_dict
+|           |   |   mk_dict
+|           |   |   ml_dict
+|           |   |   mr_dict
+|           |   |   ms_dict
+|           |   |   mto_dict
+|           |   |   mt_dict
+|           |   |   my_dict
+|           |   |   nci_dict
+|           |   |   ne_dict
+|           |   |   nl_dict
+|           |   |   nog_dict
+|           |   |   no_dict
+|           |   |   om_dict
+|           |   |   or_dict
+|           |   |   pap_dict
+|           |   |   pa_dict
+|           |   |   phondata
+|           |   |   phondata-manifest
+|           |   |   phonindex
+|           |   |   phontab
+|           |   |   piqd_dict
+|           |   |   pl_dict
+|           |   |   pt_dict
+|           |   |   py_dict
+|           |   |   qdb_dict
+|           |   |   quc_dict
+|           |   |   qu_dict
+|           |   |   qya_dict
+|           |   |   ro_dict
+|           |   |   ru_dict
+|           |   |   sd_dict
+|           |   |   shn_dict
+|           |   |   si_dict
+|           |   |   sjn_dict
+|           |   |   sk_dict
+|           |   |   sl_dict
+|           |   |   smj_dict
+|           |   |   sq_dict
+|           |   |   sr_dict
+|           |   |   sv_dict
+|           |   |   sw_dict
+|           |   |   ta_dict
+|           |   |   te_dict
+|           |   |   th_dict
+|           |   |   tk_dict
+|           |   |   tn_dict
+|           |   |   tr_dict
+|           |   |   tt_dict
+|           |   |   ug_dict
+|           |   |   uk_dict
+|           |   |   ur_dict
+|           |   |   uz_dict
+|           |   |   vi_dict
+|           |   |   yue_dict
+|           |   |   
+|           |   +---lang
+|           |   |   |   eu
+|           |   |   |   ko
+|           |   |   |   qu
+|           |   |   |   
+|           |   |   +---aav
+|           |   |   |       vi
+|           |   |   |       vi-VN-x-central
+|           |   |   |       vi-VN-x-south
+|           |   |   |       
+|           |   |   +---art
+|           |   |   |       eo
+|           |   |   |       ia
+|           |   |   |       io
+|           |   |   |       jbo
+|           |   |   |       lfn
+|           |   |   |       piqd
+|           |   |   |       py
+|           |   |   |       qdb
+|           |   |   |       qya
+|           |   |   |       sjn
+|           |   |   |       
+|           |   |   +---azc
+|           |   |   |       nci
+|           |   |   |       
+|           |   |   +---bat
+|           |   |   |       lt
+|           |   |   |       ltg
+|           |   |   |       lv
+|           |   |   |       
+|           |   |   +---bnt
+|           |   |   |       sw
+|           |   |   |       tn
+|           |   |   |       
+|           |   |   +---ccs
+|           |   |   |       ka
+|           |   |   |       
+|           |   |   +---cel
+|           |   |   |       cy
+|           |   |   |       ga
+|           |   |   |       gd
+|           |   |   |       
+|           |   |   +---cus
+|           |   |   |       om
+|           |   |   |       
+|           |   |   +---dra
+|           |   |   |       kn
+|           |   |   |       ml
+|           |   |   |       ta
+|           |   |   |       te
+|           |   |   |       
+|           |   |   +---esx
+|           |   |   |       kl
+|           |   |   |       
+|           |   |   +---gmq
+|           |   |   |       da
+|           |   |   |       is
+|           |   |   |       nb
+|           |   |   |       sv
+|           |   |   |       
+|           |   |   +---gmw
+|           |   |   |       af
+|           |   |   |       de
+|           |   |   |       en
+|           |   |   |       en-029
+|           |   |   |       en-GB-scotland
+|           |   |   |       en-GB-x-gbclan
+|           |   |   |       en-GB-x-gbcwmd
+|           |   |   |       en-GB-x-rp
+|           |   |   |       en-US
+|           |   |   |       en-US-nyc
+|           |   |   |       lb
+|           |   |   |       nl
+|           |   |   |       
+|           |   |   +---grk
+|           |   |   |       el
+|           |   |   |       grc
+|           |   |   |       
+|           |   |   +---inc
+|           |   |   |       as
+|           |   |   |       bn
+|           |   |   |       bpy
+|           |   |   |       gu
+|           |   |   |       hi
+|           |   |   |       kok
+|           |   |   |       mr
+|           |   |   |       ne
+|           |   |   |       or
+|           |   |   |       pa
+|           |   |   |       sd
+|           |   |   |       si
+|           |   |   |       ur
+|           |   |   |       
+|           |   |   +---ine
+|           |   |   |       hy
+|           |   |   |       hyw
+|           |   |   |       sq
+|           |   |   |       
+|           |   |   +---ira
+|           |   |   |       fa
+|           |   |   |       fa-Latn
+|           |   |   |       ku
+|           |   |   |       
+|           |   |   +---iro
+|           |   |   |       chr
+|           |   |   |       
+|           |   |   +---itc
+|           |   |   |       la
+|           |   |   |       
+|           |   |   +---jpx
+|           |   |   |       ja
+|           |   |   |       
+|           |   |   +---map
+|           |   |   |       haw
+|           |   |   |       
+|           |   |   +---miz
+|           |   |   |       mto
+|           |   |   |       
+|           |   |   +---myn
+|           |   |   |       quc
+|           |   |   |       
+|           |   |   +---poz
+|           |   |   |       id
+|           |   |   |       mi
+|           |   |   |       ms
+|           |   |   |       
+|           |   |   +---roa
+|           |   |   |       an
+|           |   |   |       ca
+|           |   |   |       es
+|           |   |   |       es-419
+|           |   |   |       fr
+|           |   |   |       fr-BE
+|           |   |   |       fr-CH
+|           |   |   |       ht
+|           |   |   |       it
+|           |   |   |       pap
+|           |   |   |       pt
+|           |   |   |       pt-BR
+|           |   |   |       ro
+|           |   |   |       
+|           |   |   +---sai
+|           |   |   |       gn
+|           |   |   |       
+|           |   |   +---sem
+|           |   |   |       am
+|           |   |   |       ar
+|           |   |   |       he
+|           |   |   |       mt
+|           |   |   |       
+|           |   |   +---sit
+|           |   |   |       cmn
+|           |   |   |       cmn-Latn-pinyin
+|           |   |   |       hak
+|           |   |   |       my
+|           |   |   |       yue
+|           |   |   |       yue-Latn-jyutping
+|           |   |   |       
+|           |   |   +---tai
+|           |   |   |       shn
+|           |   |   |       th
+|           |   |   |       
+|           |   |   +---trk
+|           |   |   |       az
+|           |   |   |       ba
+|           |   |   |       cv
+|           |   |   |       kk
+|           |   |   |       ky
+|           |   |   |       nog
+|           |   |   |       tk
+|           |   |   |       tr
+|           |   |   |       tt
+|           |   |   |       ug
+|           |   |   |       uz
+|           |   |   |       
+|           |   |   +---urj
+|           |   |   |       et
+|           |   |   |       fi
+|           |   |   |       hu
+|           |   |   |       smj
+|           |   |   |       
+|           |   |   +---zle
+|           |   |   |       be
+|           |   |   |       ru
+|           |   |   |       ru-cl
+|           |   |   |       ru-LV
+|           |   |   |       uk
+|           |   |   |       
+|           |   |   +---zls
+|           |   |   |       bg
+|           |   |   |       bs
+|           |   |   |       hr
+|           |   |   |       mk
+|           |   |   |       sl
+|           |   |   |       sr
+|           |   |   |       
+|           |   |   \---zlw
+|           |   |           cs
+|           |   |           pl
+|           |   |           sk
+|           |   |           
+|           |   \---voices
+|           |       \---!v
+|           |               adam
+|           |               Alex
+|           |               Alicia
+|           |               Andrea
+|           |               Andy
+|           |               anika
+|           |               anikaRobot
+|           |               Annie
+|           |               announcer
+|           |               antonio
+|           |               AnxiousAndy
+|           |               aunty
+|           |               belinda
+|           |               benjamin
+|           |               boris
+|           |               caleb
+|           |               croak
+|           |               david
+|           |               Demonic
+|           |               Denis
+|           |               Diogo
+|           |               ed
+|           |               edward
+|           |               edward2
+|           |               f1
+|           |               f2
+|           |               f3
+|           |               f4
+|           |               f5
+|           |               fast
+|           |               Gene
+|           |               Gene2
+|           |               grandma
+|           |               grandpa
+|           |               gustave
+|           |               Henrique
+|           |               Hugo
+|           |               ian
+|           |               iven
+|           |               iven2
+|           |               iven3
+|           |               iven4
+|           |               Jacky
+|           |               john
+|           |               kaukovalta
+|           |               klatt
+|           |               klatt2
+|           |               klatt3
+|           |               klatt4
+|           |               klatt5
+|           |               klatt6
+|           |               Lee
+|           |               linda
+|           |               m1
+|           |               m2
+|           |               m3
+|           |               m4
+|           |               m5
+|           |               m6
+|           |               m7
+|           |               m8
+|           |               marcelo
+|           |               Marco
+|           |               Mario
+|           |               max
+|           |               Michael
+|           |               michel
+|           |               miguel
+|           |               Mike
+|           |               mike2
+|           |               Mr serious
+|           |               Nguyen
+|           |               norbert
+|           |               pablo
+|           |               paul
+|           |               pedro
+|           |               quincy
+|           |               Reed
+|           |               RicishayMax
+|           |               RicishayMax2
+|           |               RicishayMax3
+|           |               rob
+|           |               robert
+|           |               robosoft
+|           |               robosoft2
+|           |               robosoft3
+|           |               robosoft4
+|           |               robosoft5
+|           |               robosoft6
+|           |               robosoft7
+|           |               robosoft8
+|           |               sandro
+|           |               shelby
+|           |               steph
+|           |               steph2
+|           |               steph3
+|           |               Storm
+|           |               travis
+|           |               Tweaky
+|           |               UniRobot
+|           |               victor
+|           |               whisper
+|           |               whisperf
+|           |               zac
+|           |               
+|           \---pkgconfig
++---engine
+|       local-api-handler.js
+|       
++---node_modules
+|   |   .package-lock.json
+|   |   
+|   +---.bin
+|   |       electron
+|   |       electron.cmd
+|   |       electron.ps1
+|   |       extract-zip
+|   |       extract-zip.cmd
+|   |       extract-zip.ps1
+|   |       semver
+|   |       semver.cmd
+|   |       semver.ps1
+|   |       
+|   +---@electron
+|   |   \---get
+|   |       |   LICENSE
+|   |       |   package.json
+|   |       |   README.md
+|   |       |   
+|   |       \---dist
+|   |           +---cjs
+|   |           |       artifact-utils.d.ts
+|   |           |       artifact-utils.js
+|   |           |       artifact-utils.js.map
+|   |           |       Cache.d.ts
+|   |           |       Cache.js
+|   |           |       Cache.js.map
+|   |           |       downloader-resolver.d.ts
+|   |           |       downloader-resolver.js
+|   |           |       downloader-resolver.js.map
+|   |           |       Downloader.d.ts
+|   |           |       Downloader.js
+|   |           |       Downloader.js.map
+|   |           |       GotDownloader.d.ts
+|   |           |       GotDownloader.js
+|   |           |       GotDownloader.js.map
+|   |           |       index.d.ts
+|   |           |       index.js
+|   |           |       index.js.map
+|   |           |       proxy.d.ts
+|   |           |       proxy.js
+|   |           |       proxy.js.map
+|   |           |       types.d.ts
+|   |           |       types.js
+|   |           |       types.js.map
+|   |           |       utils.d.ts
+|   |           |       utils.js
+|   |           |       utils.js.map
+|   |           |       
+|   |           \---esm
+|   |                   artifact-utils.d.ts
+|   |                   artifact-utils.js
+|   |                   artifact-utils.js.map
+|   |                   Cache.d.ts
+|   |                   Cache.js
+|   |                   Cache.js.map
+|   |                   downloader-resolver.d.ts
+|   |                   downloader-resolver.js
+|   |                   downloader-resolver.js.map
+|   |                   Downloader.d.ts
+|   |                   Downloader.js
+|   |                   Downloader.js.map
+|   |                   GotDownloader.d.ts
+|   |                   GotDownloader.js
+|   |                   GotDownloader.js.map
+|   |                   index.d.ts
+|   |                   index.js
+|   |                   index.js.map
+|   |                   proxy.d.ts
+|   |                   proxy.js
+|   |                   proxy.js.map
+|   |                   types.d.ts
+|   |                   types.js
+|   |                   types.js.map
+|   |                   utils.d.ts
+|   |                   utils.js
+|   |                   utils.js.map
+|   |                   
+|   +---@sindresorhus
+|   |   \---is
+|   |       |   license
+|   |       |   package.json
+|   |       |   readme.md
+|   |       |   
+|   |       \---dist
+|   |               index.d.ts
+|   |               index.js
+|   |               types.d.ts
+|   |               types.js
+|   |               
+|   +---@szmarczak
+|   |   \---http-timer
+|   |       |   LICENSE
+|   |       |   package.json
+|   |       |   README.md
+|   |       |   
+|   |       \---dist
+|   |           \---source
+|   |                   index.d.ts
+|   |                   index.js
+|   |                   
+|   +---@types
+|   |   +---cacheable-request
+|   |   |       index.d.ts
+|   |   |       LICENSE
+|   |   |       package.json
+|   |   |       README.md
+|   |   |       
+|   |   +---http-cache-semantics
+|   |   |       index.d.ts
+|   |   |       LICENSE
+|   |   |       package.json
+|   |   |       README.md
+|   |   |       
+|   |   +---keyv
+|   |   |       index.d.ts
+|   |   |       LICENSE
+|   |   |       package.json
+|   |   |       README.md
+|   |   |       
+|   |   +---node
+|   |   |   |   assert.d.ts
+|   |   |   |   async_hooks.d.ts
+|   |   |   |   buffer.buffer.d.ts
+|   |   |   |   buffer.d.ts
+|   |   |   |   child_process.d.ts
+|   |   |   |   cluster.d.ts
+|   |   |   |   console.d.ts
+|   |   |   |   constants.d.ts
+|   |   |   |   crypto.d.ts
+|   |   |   |   dgram.d.ts
+|   |   |   |   diagnostics_channel.d.ts
+|   |   |   |   dns.d.ts
+|   |   |   |   domain.d.ts
+|   |   |   |   events.d.ts
+|   |   |   |   fs.d.ts
+|   |   |   |   globals.d.ts
+|   |   |   |   globals.typedarray.d.ts
+|   |   |   |   http.d.ts
+|   |   |   |   http2.d.ts
+|   |   |   |   https.d.ts
+|   |   |   |   index.d.ts
+|   |   |   |   inspector.generated.d.ts
+|   |   |   |   LICENSE
+|   |   |   |   module.d.ts
+|   |   |   |   net.d.ts
+|   |   |   |   os.d.ts
+|   |   |   |   package.json
+|   |   |   |   path.d.ts
+|   |   |   |   perf_hooks.d.ts
+|   |   |   |   process.d.ts
+|   |   |   |   punycode.d.ts
+|   |   |   |   querystring.d.ts
+|   |   |   |   readline.d.ts
+|   |   |   |   README.md
+|   |   |   |   repl.d.ts
+|   |   |   |   stream.d.ts
+|   |   |   |   string_decoder.d.ts
+|   |   |   |   test.d.ts
+|   |   |   |   timers.d.ts
+|   |   |   |   tls.d.ts
+|   |   |   |   trace_events.d.ts
+|   |   |   |   tty.d.ts
+|   |   |   |   url.d.ts
+|   |   |   |   util.d.ts
+|   |   |   |   v8.d.ts
+|   |   |   |   vm.d.ts
+|   |   |   |   wasi.d.ts
+|   |   |   |   worker_threads.d.ts
+|   |   |   |   zlib.d.ts
+|   |   |   |   
+|   |   |   +---assert
+|   |   |   |       strict.d.ts
+|   |   |   |       
+|   |   |   +---compatibility
+|   |   |   |       disposable.d.ts
+|   |   |   |       index.d.ts
+|   |   |   |       indexable.d.ts
+|   |   |   |       iterators.d.ts
+|   |   |   |       
+|   |   |   +---dns
+|   |   |   |       promises.d.ts
+|   |   |   |       
+|   |   |   +---fs
+|   |   |   |       promises.d.ts
+|   |   |   |       
+|   |   |   +---readline
+|   |   |   |       promises.d.ts
+|   |   |   |       
+|   |   |   +---stream
+|   |   |   |       consumers.d.ts
+|   |   |   |       promises.d.ts
+|   |   |   |       web.d.ts
+|   |   |   |       
+|   |   |   +---timers
+|   |   |   |       promises.d.ts
+|   |   |   |       
+|   |   |   +---ts5.6
+|   |   |   |       buffer.buffer.d.ts
+|   |   |   |       globals.typedarray.d.ts
+|   |   |   |       index.d.ts
+|   |   |   |       
+|   |   |   \---web-globals
+|   |   |           abortcontroller.d.ts
+|   |   |           domexception.d.ts
+|   |   |           events.d.ts
+|   |   |           fetch.d.ts
+|   |   |           
+|   |   +---responselike
+|   |   |       index.d.ts
+|   |   |       LICENSE
+|   |   |       package.json
+|   |   |       README.md
+|   |   |       
+|   |   \---yauzl
+|   |           index.d.ts
+|   |           LICENSE
+|   |           package.json
+|   |           README.md
+|   |           
+|   +---asynckit
+|   |   |   bench.js
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   parallel.js
+|   |   |   README.md
+|   |   |   serial.js
+|   |   |   serialOrdered.js
+|   |   |   stream.js
+|   |   |   
+|   |   \---lib
+|   |           abort.js
+|   |           async.js
+|   |           defer.js
+|   |           iterate.js
+|   |           readable_asynckit.js
+|   |           readable_parallel.js
+|   |           readable_serial.js
+|   |           readable_serial_ordered.js
+|   |           state.js
+|   |           streamify.js
+|   |           terminator.js
+|   |           
+|   +---axios
+|   |   |   CHANGELOG.md
+|   |   |   index.d.cts
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   MIGRATION_GUIDE.md
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   SECURITY.md
+|   |   |   
+|   |   +---dist
+|   |   |   |   axios.js
+|   |   |   |   axios.js.map
+|   |   |   |   axios.min.js
+|   |   |   |   axios.min.js.map
+|   |   |   |   
+|   |   |   +---browser
+|   |   |   |       axios.cjs
+|   |   |   |       axios.cjs.map
+|   |   |   |       
+|   |   |   +---esm
+|   |   |   |       axios.js
+|   |   |   |       axios.js.map
+|   |   |   |       axios.min.js
+|   |   |   |       axios.min.js.map
+|   |   |   |       
+|   |   |   \---node
+|   |   |           axios.cjs
+|   |   |           axios.cjs.map
+|   |   |           
+|   |   \---lib
+|   |       |   axios.js
+|   |       |   utils.js
+|   |       |   
+|   |       +---adapters
+|   |       |       adapters.js
+|   |       |       http.js
+|   |       |       README.md
+|   |       |       xhr.js
+|   |       |       
+|   |       +---cancel
+|   |       |       CanceledError.js
+|   |       |       CancelToken.js
+|   |       |       isCancel.js
+|   |       |       
+|   |       +---core
+|   |       |       Axios.js
+|   |       |       AxiosError.js
+|   |       |       AxiosHeaders.js
+|   |       |       buildFullPath.js
+|   |       |       dispatchRequest.js
+|   |       |       InterceptorManager.js
+|   |       |       mergeConfig.js
+|   |       |       README.md
+|   |       |       settle.js
+|   |       |       transformData.js
+|   |       |       
+|   |       +---defaults
+|   |       |       index.js
+|   |       |       transitional.js
+|   |       |       
+|   |       +---env
+|   |       |   |   data.js
+|   |       |   |   README.md
+|   |       |   |   
+|   |       |   \---classes
+|   |       |           FormData.js
+|   |       |           
+|   |       +---helpers
+|   |       |       AxiosTransformStream.js
+|   |       |       AxiosURLSearchParams.js
+|   |       |       bind.js
+|   |       |       buildURL.js
+|   |       |       callbackify.js
+|   |       |       combineURLs.js
+|   |       |       cookies.js
+|   |       |       deprecatedMethod.js
+|   |       |       formDataToJSON.js
+|   |       |       formDataToStream.js
+|   |       |       fromDataURI.js
+|   |       |       HttpStatusCode.js
+|   |       |       isAbsoluteURL.js
+|   |       |       isAxiosError.js
+|   |       |       isURLSameOrigin.js
+|   |       |       null.js
+|   |       |       parseHeaders.js
+|   |       |       parseProtocol.js
+|   |       |       readBlob.js
+|   |       |       README.md
+|   |       |       speedometer.js
+|   |       |       spread.js
+|   |       |       throttle.js
+|   |       |       toFormData.js
+|   |       |       toURLEncodedForm.js
+|   |       |       validator.js
+|   |       |       ZlibHeaderTransformStream.js
+|   |       |       
+|   |       \---platform
+|   |           |   index.js
+|   |           |   
+|   |           +---browser
+|   |           |   |   index.js
+|   |           |   |   
+|   |           |   \---classes
+|   |           |           Blob.js
+|   |           |           FormData.js
+|   |           |           URLSearchParams.js
+|   |           |           
+|   |           \---node
+|   |               |   index.js
+|   |               |   
+|   |               \---classes
+|   |                       FormData.js
+|   |                       URLSearchParams.js
+|   |                       
+|   +---boolean
+|   |   |   .eslintrc.json
+|   |   |   .npmpackagejsonlintrc.json
+|   |   |   .releaserc.json
+|   |   |   CHANGELOG.md
+|   |   |   LICENSE.txt
+|   |   |   licenseCheck.json
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---build
+|   |   |   \---lib
+|   |   |           boolean.d.ts
+|   |   |           boolean.js
+|   |   |           index.d.ts
+|   |   |           index.js
+|   |   |           isBooleanable.d.ts
+|   |   |           isBooleanable.js
+|   |   |           
+|   |   \---lib
+|   |           boolean.ts
+|   |           index.ts
+|   |           isBooleanable.ts
+|   |           
+|   +---buffer-crc32
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---cacheable-lookup
+|   |   |   index.d.ts
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---source
+|   |           index.js
+|   |           
+|   +---cacheable-request
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---src
+|   |           index.js
+|   |           
+|   +---call-bind-apply-helpers
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   actualApply.d.ts
+|   |   |   actualApply.js
+|   |   |   applyBind.d.ts
+|   |   |   applyBind.js
+|   |   |   CHANGELOG.md
+|   |   |   functionApply.d.ts
+|   |   |   functionApply.js
+|   |   |   functionCall.d.ts
+|   |   |   functionCall.js
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   reflectApply.d.ts
+|   |   |   reflectApply.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---clone-response
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---src
+|   |           index.js
+|   |           
+|   +---combined-stream
+|   |   |   License
+|   |   |   package.json
+|   |   |   Readme.md
+|   |   |   yarn.lock
+|   |   |   
+|   |   \---lib
+|   |           combined_stream.js
+|   |           
+|   +---debug
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---src
+|   |           browser.js
+|   |           common.js
+|   |           index.js
+|   |           node.js
+|   |           
+|   +---decompress-response
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   license
+|   |   |   package.json
+|   |   |   readme.md
+|   |   |   
+|   |   \---node_modules
+|   |       \---mimic-response
+|   |               index.d.ts
+|   |               index.js
+|   |               license
+|   |               package.json
+|   |               readme.md
+|   |               
+|   +---defer-to-connect
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---dist
+|   |       \---source
+|   |               index.d.ts
+|   |               index.js
+|   |               
+|   +---define-data-property
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---define-properties
+|   |   |   .editorconfig
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---.github
+|   |           FUNDING.yml
+|   |           
+|   +---delayed-stream
+|   |   |   .npmignore
+|   |   |   License
+|   |   |   Makefile
+|   |   |   package.json
+|   |   |   Readme.md
+|   |   |   
+|   |   \---lib
+|   |           delayed_stream.js
+|   |           
+|   +---detect-node
+|   |       browser.js
+|   |       index.esm.js
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       Readme.md
+|   |       
+|   +---dunder-proto
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   get.d.ts
+|   |   |   get.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   set.d.ts
+|   |   |   set.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           get.js
+|   |           index.js
+|   |           set.js
+|   |           
+|   +---electron
+|   |   |   checksums.json
+|   |   |   cli.js
+|   |   |   electron.d.ts
+|   |   |   index.js
+|   |   |   install.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   path.txt
+|   |   |   README.md
+|   |   |   
+|   |   \---dist
+|   |       |   chrome_100_percent.pak
+|   |       |   chrome_200_percent.pak
+|   |       |   d3dcompiler_47.dll
+|   |       |   dxcompiler.dll
+|   |       |   dxil.dll
+|   |       |   electron.exe
+|   |       |   ffmpeg.dll
+|   |       |   icudtl.dat
+|   |       |   libEGL.dll
+|   |       |   libGLESv2.dll
+|   |       |   LICENSE
+|   |       |   LICENSES.chromium.html
+|   |       |   resources.pak
+|   |       |   snapshot_blob.bin
+|   |       |   v8_context_snapshot.bin
+|   |       |   version
+|   |       |   vk_swiftshader.dll
+|   |       |   vk_swiftshader_icd.json
+|   |       |   vulkan-1.dll
+|   |       |   
+|   |       +---locales
+|   |       |       af.pak
+|   |       |       am.pak
+|   |       |       ar.pak
+|   |       |       bg.pak
+|   |       |       bn.pak
+|   |       |       ca.pak
+|   |       |       cs.pak
+|   |       |       da.pak
+|   |       |       de.pak
+|   |       |       el.pak
+|   |       |       en-GB.pak
+|   |       |       en-US.pak
+|   |       |       es-419.pak
+|   |       |       es.pak
+|   |       |       et.pak
+|   |       |       fa.pak
+|   |       |       fi.pak
+|   |       |       fil.pak
+|   |       |       fr.pak
+|   |       |       gu.pak
+|   |       |       he.pak
+|   |       |       hi.pak
+|   |       |       hr.pak
+|   |       |       hu.pak
+|   |       |       id.pak
+|   |       |       it.pak
+|   |       |       ja.pak
+|   |       |       kn.pak
+|   |       |       ko.pak
+|   |       |       lt.pak
+|   |       |       lv.pak
+|   |       |       ml.pak
+|   |       |       mr.pak
+|   |       |       ms.pak
+|   |       |       nb.pak
+|   |       |       nl.pak
+|   |       |       pl.pak
+|   |       |       pt-BR.pak
+|   |       |       pt-PT.pak
+|   |       |       ro.pak
+|   |       |       ru.pak
+|   |       |       sk.pak
+|   |       |       sl.pak
+|   |       |       sr.pak
+|   |       |       sv.pak
+|   |       |       sw.pak
+|   |       |       ta.pak
+|   |       |       te.pak
+|   |       |       th.pak
+|   |       |       tr.pak
+|   |       |       uk.pak
+|   |       |       ur.pak
+|   |       |       vi.pak
+|   |       |       zh-CN.pak
+|   |       |       zh-TW.pak
+|   |       |       
+|   |       \---resources
+|   |               default_app.asar
+|   |               
+|   +---end-of-stream
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---env-paths
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---es-define-property
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---es-errors
+|   |   |   .eslintrc
+|   |   |   CHANGELOG.md
+|   |   |   eval.d.ts
+|   |   |   eval.js
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   range.d.ts
+|   |   |   range.js
+|   |   |   README.md
+|   |   |   ref.d.ts
+|   |   |   ref.js
+|   |   |   syntax.d.ts
+|   |   |   syntax.js
+|   |   |   tsconfig.json
+|   |   |   type.d.ts
+|   |   |   type.js
+|   |   |   uri.d.ts
+|   |   |   uri.js
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---es-object-atoms
+|   |   |   .eslintrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   isObject.d.ts
+|   |   |   isObject.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   RequireObjectCoercible.d.ts
+|   |   |   RequireObjectCoercible.js
+|   |   |   ToObject.d.ts
+|   |   |   ToObject.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---es-set-tostringtag
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---es6-error
+|   |   |   CHANGELOG.md
+|   |   |   LICENSE.md
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---es6
+|   |   |       index.js
+|   |   |       
+|   |   +---lib
+|   |   |       index.js
+|   |   |       
+|   |   \---typings
+|   |           index.d.ts
+|   |           
+|   +---escape-string-regexp
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---extract-zip
+|   |       cli.js
+|   |       index.d.ts
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---fd-slicer
+|   |   |   .npmignore
+|   |   |   .travis.yml
+|   |   |   CHANGELOG.md
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---test
+|   |           test.js
+|   |           
+|   +---follow-redirects
+|   |       debug.js
+|   |       http.js
+|   |       https.js
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---form-data
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   License
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---lib
+|   |           browser.js
+|   |           form_data.js
+|   |           populate.js
+|   |           
+|   +---fs-extra
+|   |   |   CHANGELOG.md
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---lib
+|   |       |   index.js
+|   |       |   
+|   |       +---copy
+|   |       |       copy.js
+|   |       |       index.js
+|   |       |       
+|   |       +---copy-sync
+|   |       |       copy-sync.js
+|   |       |       index.js
+|   |       |       
+|   |       +---empty
+|   |       |       index.js
+|   |       |       
+|   |       +---ensure
+|   |       |       file.js
+|   |       |       index.js
+|   |       |       link.js
+|   |       |       symlink-paths.js
+|   |       |       symlink-type.js
+|   |       |       symlink.js
+|   |       |       
+|   |       +---fs
+|   |       |       index.js
+|   |       |       
+|   |       +---json
+|   |       |       index.js
+|   |       |       jsonfile.js
+|   |       |       output-json-sync.js
+|   |       |       output-json.js
+|   |       |       
+|   |       +---mkdirs
+|   |       |       index.js
+|   |       |       mkdirs-sync.js
+|   |       |       mkdirs.js
+|   |       |       win32.js
+|   |       |       
+|   |       +---move
+|   |       |       index.js
+|   |       |       move.js
+|   |       |       
+|   |       +---move-sync
+|   |       |       index.js
+|   |       |       move-sync.js
+|   |       |       
+|   |       +---output
+|   |       |       index.js
+|   |       |       
+|   |       +---path-exists
+|   |       |       index.js
+|   |       |       
+|   |       +---remove
+|   |       |       index.js
+|   |       |       rimraf.js
+|   |       |       
+|   |       \---util
+|   |               buffer.js
+|   |               stat.js
+|   |               utimes.js
+|   |               
+|   +---function-bind
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   implementation.js
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       SECURITY.md
+|   |   |       
+|   |   \---test
+|   |           .eslintrc
+|   |           index.js
+|   |           
+|   +---get-intrinsic
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           GetIntrinsic.js
+|   |           
+|   +---get-proto
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   Object.getPrototypeOf.d.ts
+|   |   |   Object.getPrototypeOf.js
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   Reflect.getPrototypeOf.d.ts
+|   |   |   Reflect.getPrototypeOf.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---get-stream
+|   |       buffer-stream.js
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---global-agent
+|   |   |   .flowconfig
+|   |   |   bootstrap.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---dist
+|   |   |   |   errors.js
+|   |   |   |   errors.js.flow
+|   |   |   |   errors.js.map
+|   |   |   |   index.js
+|   |   |   |   index.js.flow
+|   |   |   |   index.js.map
+|   |   |   |   Logger.js
+|   |   |   |   Logger.js.flow
+|   |   |   |   Logger.js.map
+|   |   |   |   types.js
+|   |   |   |   types.js.flow
+|   |   |   |   types.js.map
+|   |   |   |   
+|   |   |   +---classes
+|   |   |   |       Agent.js
+|   |   |   |       Agent.js.flow
+|   |   |   |       Agent.js.map
+|   |   |   |       HttpProxyAgent.js
+|   |   |   |       HttpProxyAgent.js.flow
+|   |   |   |       HttpProxyAgent.js.map
+|   |   |   |       HttpsProxyAgent.js
+|   |   |   |       HttpsProxyAgent.js.flow
+|   |   |   |       HttpsProxyAgent.js.map
+|   |   |   |       index.js
+|   |   |   |       index.js.flow
+|   |   |   |       index.js.map
+|   |   |   |       
+|   |   |   +---factories
+|   |   |   |       createGlobalProxyAgent.js
+|   |   |   |       createGlobalProxyAgent.js.flow
+|   |   |   |       createGlobalProxyAgent.js.map
+|   |   |   |       createProxyController.js
+|   |   |   |       createProxyController.js.flow
+|   |   |   |       createProxyController.js.map
+|   |   |   |       index.js
+|   |   |   |       index.js.flow
+|   |   |   |       index.js.map
+|   |   |   |       
+|   |   |   +---routines
+|   |   |   |       bootstrap.js
+|   |   |   |       bootstrap.js.flow
+|   |   |   |       bootstrap.js.map
+|   |   |   |       index.js
+|   |   |   |       index.js.flow
+|   |   |   |       index.js.map
+|   |   |   |       
+|   |   |   \---utilities
+|   |   |           bindHttpMethod.js
+|   |   |           bindHttpMethod.js.flow
+|   |   |           bindHttpMethod.js.map
+|   |   |           index.js
+|   |   |           index.js.flow
+|   |   |           index.js.map
+|   |   |           isUrlMatchingNoProxy.js
+|   |   |           isUrlMatchingNoProxy.js.flow
+|   |   |           isUrlMatchingNoProxy.js.map
+|   |   |           parseProxyUrl.js
+|   |   |           parseProxyUrl.js.flow
+|   |   |           parseProxyUrl.js.map
+|   |   |           
+|   |   +---node_modules
+|   |   |   +---.bin
+|   |   |   |       semver
+|   |   |   |       semver.cmd
+|   |   |   |       semver.ps1
+|   |   |   |       
+|   |   |   \---semver
+|   |   |       |   index.js
+|   |   |       |   LICENSE
+|   |   |       |   package.json
+|   |   |       |   preload.js
+|   |   |       |   range.bnf
+|   |   |       |   README.md
+|   |   |       |   
+|   |   |       +---bin
+|   |   |       |       semver.js
+|   |   |       |       
+|   |   |       +---classes
+|   |   |       |       comparator.js
+|   |   |       |       index.js
+|   |   |       |       range.js
+|   |   |       |       semver.js
+|   |   |       |       
+|   |   |       +---functions
+|   |   |       |       clean.js
+|   |   |       |       cmp.js
+|   |   |       |       coerce.js
+|   |   |       |       compare-build.js
+|   |   |       |       compare-loose.js
+|   |   |       |       compare.js
+|   |   |       |       diff.js
+|   |   |       |       eq.js
+|   |   |       |       gt.js
+|   |   |       |       gte.js
+|   |   |       |       inc.js
+|   |   |       |       lt.js
+|   |   |       |       lte.js
+|   |   |       |       major.js
+|   |   |       |       minor.js
+|   |   |       |       neq.js
+|   |   |       |       parse.js
+|   |   |       |       patch.js
+|   |   |       |       prerelease.js
+|   |   |       |       rcompare.js
+|   |   |       |       rsort.js
+|   |   |       |       satisfies.js
+|   |   |       |       sort.js
+|   |   |       |       valid.js
+|   |   |       |       
+|   |   |       +---internal
+|   |   |       |       constants.js
+|   |   |       |       debug.js
+|   |   |       |       identifiers.js
+|   |   |       |       lrucache.js
+|   |   |       |       parse-options.js
+|   |   |       |       re.js
+|   |   |       |       
+|   |   |       \---ranges
+|   |   |               gtr.js
+|   |   |               intersects.js
+|   |   |               ltr.js
+|   |   |               max-satisfying.js
+|   |   |               min-satisfying.js
+|   |   |               min-version.js
+|   |   |               outside.js
+|   |   |               simplify.js
+|   |   |               subset.js
+|   |   |               to-comparators.js
+|   |   |               valid.js
+|   |   |               
+|   |   \---src
+|   |       |   errors.js
+|   |       |   index.js
+|   |       |   Logger.js
+|   |       |   types.js
+|   |       |   
+|   |       +---classes
+|   |       |       Agent.js
+|   |       |       HttpProxyAgent.js
+|   |       |       HttpsProxyAgent.js
+|   |       |       index.js
+|   |       |       
+|   |       +---factories
+|   |       |       createGlobalProxyAgent.js
+|   |       |       createProxyController.js
+|   |       |       index.js
+|   |       |       
+|   |       +---routines
+|   |       |       bootstrap.js
+|   |       |       index.js
+|   |       |       
+|   |       \---utilities
+|   |               bindHttpMethod.js
+|   |               index.js
+|   |               isUrlMatchingNoProxy.js
+|   |               parseProxyUrl.js
+|   |               
+|   +---globalthis
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   auto.js
+|   |   |   CHANGELOG.md
+|   |   |   implementation.browser.js
+|   |   |   implementation.js
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   polyfill.js
+|   |   |   README.md
+|   |   |   shim.js
+|   |   |   
+|   |   \---test
+|   |           implementation.js
+|   |           index.js
+|   |           native.js
+|   |           shimmed.js
+|   |           tests.js
+|   |           
+|   +---gopd
+|   |   |   .eslintrc
+|   |   |   CHANGELOG.md
+|   |   |   gOPD.d.ts
+|   |   |   gOPD.js
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---got
+|   |   |   license
+|   |   |   package.json
+|   |   |   readme.md
+|   |   |   
+|   |   \---dist
+|   |       \---source
+|   |           |   create.d.ts
+|   |           |   create.js
+|   |           |   index.d.ts
+|   |           |   index.js
+|   |           |   types.d.ts
+|   |           |   types.js
+|   |           |   
+|   |           +---as-promise
+|   |           |       create-rejection.d.ts
+|   |           |       create-rejection.js
+|   |           |       index.d.ts
+|   |           |       index.js
+|   |           |       normalize-arguments.d.ts
+|   |           |       normalize-arguments.js
+|   |           |       parse-body.d.ts
+|   |           |       parse-body.js
+|   |           |       types.d.ts
+|   |           |       types.js
+|   |           |       
+|   |           +---core
+|   |           |   |   calculate-retry-delay.d.ts
+|   |           |   |   calculate-retry-delay.js
+|   |           |   |   index.d.ts
+|   |           |   |   index.js
+|   |           |   |   
+|   |           |   \---utils
+|   |           |           dns-ip-version.d.ts
+|   |           |           dns-ip-version.js
+|   |           |           get-body-size.d.ts
+|   |           |           get-body-size.js
+|   |           |           get-buffer.d.ts
+|   |           |           get-buffer.js
+|   |           |           is-form-data.d.ts
+|   |           |           is-form-data.js
+|   |           |           is-response-ok.d.ts
+|   |           |           is-response-ok.js
+|   |           |           options-to-url.d.ts
+|   |           |           options-to-url.js
+|   |           |           proxy-events.d.ts
+|   |           |           proxy-events.js
+|   |           |           timed-out.d.ts
+|   |           |           timed-out.js
+|   |           |           unhandle.d.ts
+|   |           |           unhandle.js
+|   |           |           url-to-options.d.ts
+|   |           |           url-to-options.js
+|   |           |           weakable-map.d.ts
+|   |           |           weakable-map.js
+|   |           |           
+|   |           \---utils
+|   |                   deep-freeze.d.ts
+|   |                   deep-freeze.js
+|   |                   deprecation-warning.d.ts
+|   |                   deprecation-warning.js
+|   |                   
+|   +---graceful-fs
+|   |       clone.js
+|   |       graceful-fs.js
+|   |       legacy-streams.js
+|   |       LICENSE
+|   |       package.json
+|   |       polyfills.js
+|   |       README.md
+|   |       
+|   +---has-property-descriptors
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---has-symbols
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   shams.d.ts
+|   |   |   shams.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |       |   index.js
+|   |       |   tests.js
+|   |       |   
+|   |       \---shams
+|   |               core-js.js
+|   |               get-own-property-symbols.js
+|   |               
+|   +---has-tostringtag
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   shams.d.ts
+|   |   |   shams.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   \---test
+|   |       |   index.js
+|   |       |   tests.js
+|   |       |   
+|   |       \---shams
+|   |               core-js.js
+|   |               get-own-property-symbols.js
+|   |               
+|   +---hasown
+|   |   |   .eslintrc
+|   |   |   .nycrc
+|   |   |   CHANGELOG.md
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   tsconfig.json
+|   |   |   
+|   |   \---.github
+|   |           FUNDING.yml
+|   |           
+|   +---http-cache-semantics
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---http2-wrapper
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---source
+|   |       |   agent.js
+|   |       |   auto.js
+|   |       |   client-request.js
+|   |       |   incoming-message.js
+|   |       |   index.js
+|   |       |   
+|   |       \---utils
+|   |               calculate-server-name.js
+|   |               errors.js
+|   |               is-request-pseudo-header.js
+|   |               proxy-events.js
+|   |               url-to-options.js
+|   |               
+|   +---json-buffer
+|   |   |   .travis.yml
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---json-stringify-safe
+|   |   |   .npmignore
+|   |   |   CHANGELOG.md
+|   |   |   LICENSE
+|   |   |   Makefile
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   stringify.js
+|   |   |   
+|   |   \---test
+|   |           mocha.opts
+|   |           stringify_test.js
+|   |           
+|   +---jsonfile
+|   |       CHANGELOG.md
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---keyv
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---src
+|   |           index.d.ts
+|   |           index.js
+|   |           
+|   +---lowercase-keys
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---matcher
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---math-intrinsics
+|   |   |   .eslintrc
+|   |   |   abs.d.ts
+|   |   |   abs.js
+|   |   |   CHANGELOG.md
+|   |   |   floor.d.ts
+|   |   |   floor.js
+|   |   |   isFinite.d.ts
+|   |   |   isFinite.js
+|   |   |   isInteger.d.ts
+|   |   |   isInteger.js
+|   |   |   isNaN.d.ts
+|   |   |   isNaN.js
+|   |   |   isNegativeZero.d.ts
+|   |   |   isNegativeZero.js
+|   |   |   LICENSE
+|   |   |   max.d.ts
+|   |   |   max.js
+|   |   |   min.d.ts
+|   |   |   min.js
+|   |   |   mod.d.ts
+|   |   |   mod.js
+|   |   |   package.json
+|   |   |   pow.d.ts
+|   |   |   pow.js
+|   |   |   README.md
+|   |   |   round.d.ts
+|   |   |   round.js
+|   |   |   sign.d.ts
+|   |   |   sign.js
+|   |   |   tsconfig.json
+|   |   |   
+|   |   +---.github
+|   |   |       FUNDING.yml
+|   |   |       
+|   |   +---constants
+|   |   |       maxArrayLength.d.ts
+|   |   |       maxArrayLength.js
+|   |   |       maxSafeInteger.d.ts
+|   |   |       maxSafeInteger.js
+|   |   |       maxValue.d.ts
+|   |   |       maxValue.js
+|   |   |       
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---mime-db
+|   |       db.json
+|   |       HISTORY.md
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---mime-types
+|   |       HISTORY.md
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---mimic-response
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---ms
+|   |       index.js
+|   |       license.md
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---normalize-url
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---object-keys
+|   |   |   .editorconfig
+|   |   |   .eslintrc
+|   |   |   .travis.yml
+|   |   |   CHANGELOG.md
+|   |   |   implementation.js
+|   |   |   index.js
+|   |   |   isArguments.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---test
+|   |           index.js
+|   |           
+|   +---once
+|   |       LICENSE
+|   |       once.js
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---p-cancelable
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---pend
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       test.js
+|   |       
+|   +---progress
+|   |   |   CHANGELOG.md
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   Makefile
+|   |   |   package.json
+|   |   |   Readme.md
+|   |   |   
+|   |   \---lib
+|   |           node-progress.js
+|   |           
+|   +---proxy-from-env
+|   |       .eslintrc
+|   |       .travis.yml
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       test.js
+|   |       
+|   +---pump
+|   |   |   .travis.yml
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   SECURITY.md
+|   |   |   test-browser.js
+|   |   |   test-node.js
+|   |   |   
+|   |   \---.github
+|   |           FUNDING.yml
+|   |           
+|   +---quick-lru
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---resolve-alpn
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---responselike
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---src
+|   |           index.js
+|   |           
+|   +---roarr
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   \---dist
+|   |       |   constants.js
+|   |       |   constants.js.flow
+|   |       |   constants.js.map
+|   |       |   log.js
+|   |       |   log.js.flow
+|   |       |   log.js.map
+|   |       |   types.js
+|   |       |   types.js.flow
+|   |       |   types.js.map
+|   |       |   
+|   |       \---factories
+|   |               createLogger.js
+|   |               createLogger.js.flow
+|   |               createLogger.js.map
+|   |               createMockLogger.js
+|   |               createMockLogger.js.flow
+|   |               createMockLogger.js.map
+|   |               createNodeWriter.js
+|   |               createNodeWriter.js.flow
+|   |               createNodeWriter.js.map
+|   |               createRoarrInititialGlobalState.js
+|   |               createRoarrInititialGlobalState.js.flow
+|   |               createRoarrInititialGlobalState.js.map
+|   |               index.js
+|   |               index.js.flow
+|   |               index.js.map
+|   |               
+|   +---semver
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   range.bnf
+|   |   |   README.md
+|   |   |   semver.js
+|   |   |   
+|   |   \---bin
+|   |           semver.js
+|   |           
+|   +---semver-compare
+|   |   |   .travis.yml
+|   |   |   index.js
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   readme.markdown
+|   |   |   
+|   |   +---example
+|   |   |       cmp.js
+|   |   |       lex.js
+|   |   |       
+|   |   \---test
+|   |           cmp.js
+|   |           
+|   +---serialize-error
+|   |       index.d.ts
+|   |       index.js
+|   |       license
+|   |       package.json
+|   |       readme.md
+|   |       
+|   +---sprintf-js
+|   |   |   CONTRIBUTORS.md
+|   |   |   LICENSE
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   
+|   |   +---dist
+|   |   |       .gitattributes
+|   |   |       angular-sprintf.min.js
+|   |   |       angular-sprintf.min.js.map
+|   |   |       sprintf.min.js
+|   |   |       sprintf.min.js.map
+|   |   |       
+|   |   \---src
+|   |           angular-sprintf.js
+|   |           sprintf.js
+|   |           
+|   +---sumchecker
+|   |   |   index.d.ts
+|   |   |   index.js
+|   |   |   index.test-d.ts
+|   |   |   LICENSE
+|   |   |   NEWS.md
+|   |   |   package.json
+|   |   |   README.md
+|   |   |   yarn.lock
+|   |   |   
+|   |   \---.github
+|   |       |   FUNDING.yml
+|   |       |   
+|   |       \---workflows
+|   |               ci.yml
+|   |               
+|   +---type-fest
+|   |   |   index.d.ts
+|   |   |   license
+|   |   |   package.json
+|   |   |   readme.md
+|   |   |   
+|   |   \---source
+|   |           async-return-type.d.ts
+|   |           basic.d.ts
+|   |           conditional-except.d.ts
+|   |           conditional-keys.d.ts
+|   |           conditional-pick.d.ts
+|   |           except.d.ts
+|   |           literal-union.d.ts
+|   |           merge-exclusive.d.ts
+|   |           merge.d.ts
+|   |           mutable.d.ts
+|   |           opaque.d.ts
+|   |           package-json.d.ts
+|   |           partial-deep.d.ts
+|   |           promisable.d.ts
+|   |           promise-value.d.ts
+|   |           readonly-deep.d.ts
+|   |           require-at-least-one.d.ts
+|   |           require-exactly-one.d.ts
+|   |           set-optional.d.ts
+|   |           set-required.d.ts
+|   |           stringified.d.ts
+|   |           tsconfig-json.d.ts
+|   |           union-to-intersection.d.ts
+|   |           value-of.d.ts
+|   |           
+|   +---undici-types
+|   |       agent.d.ts
+|   |       api.d.ts
+|   |       balanced-pool.d.ts
+|   |       cache.d.ts
+|   |       client.d.ts
+|   |       connector.d.ts
+|   |       content-type.d.ts
+|   |       cookies.d.ts
+|   |       diagnostics-channel.d.ts
+|   |       dispatcher.d.ts
+|   |       errors.d.ts
+|   |       fetch.d.ts
+|   |       file.d.ts
+|   |       filereader.d.ts
+|   |       formdata.d.ts
+|   |       global-dispatcher.d.ts
+|   |       global-origin.d.ts
+|   |       handlers.d.ts
+|   |       header.d.ts
+|   |       index.d.ts
+|   |       interceptors.d.ts
+|   |       mock-agent.d.ts
+|   |       mock-client.d.ts
+|   |       mock-errors.d.ts
+|   |       mock-interceptor.d.ts
+|   |       mock-pool.d.ts
+|   |       package.json
+|   |       patch.d.ts
+|   |       pool-stats.d.ts
+|   |       pool.d.ts
+|   |       proxy-agent.d.ts
+|   |       readable.d.ts
+|   |       README.md
+|   |       webidl.d.ts
+|   |       websocket.d.ts
+|   |       
+|   +---universalify
+|   |       index.js
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       
+|   +---wrappy
+|   |       LICENSE
+|   |       package.json
+|   |       README.md
+|   |       wrappy.js
+|   |       
+|   \---yauzl
+|           index.js
+|           LICENSE
+|           package.json
+|           README.md
+|           
+\---src
+        logic.js
+        style.css
+        ui.html
+        

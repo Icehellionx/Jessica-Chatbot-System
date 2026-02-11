@@ -10,6 +10,7 @@
 let currentMusic = null;      // The currently "active" Audio instance
 let musicVolume = 0.5;        // 0..1
 let isMuted = false;
+let voiceVolume = 1.0;        // 0..1 for TTS
 
 const LOOP_CROSSFADE_MS = 2000;
 const FADE_TICK_MS = 50;
@@ -29,7 +30,32 @@ function setupVolumeControls() {
     display:flex;
     align-items:center;
     margin-right:15px;
+    gap: 10px;
   `;
+
+  // Helper to create a labeled group (Label on top, controls below)
+  const createGroup = (labelText, btn, slider) => {
+    const group = document.createElement('div');
+    group.style.cssText = `
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    `;
+    
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    label.style.cssText = 'color:#ccc; font-size:10px; font-family:sans-serif; margin-bottom:2px;';
+    
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center;';
+    
+    row.appendChild(btn);
+    row.appendChild(slider);
+    
+    group.appendChild(label);
+    group.appendChild(row);
+    return group;
+  };
 
   const muteBtn = document.createElement('button');
   muteBtn.id = 'mute-btn';
@@ -41,7 +67,7 @@ function setupVolumeControls() {
     color:#ddd;
     font-size:16px;
     cursor:pointer;
-    margin-right:8px;
+    margin-right:5px;
     padding:0;
     line-height:1;
   `;
@@ -54,18 +80,47 @@ function setupVolumeControls() {
   volumeSlider.step = '0.05';
   volumeSlider.value = String(musicVolume);
   volumeSlider.style.cssText = `
-    width:80px;
+    width:60px;
     cursor:pointer;
     accent-color:#0078d4;
   `;
+  volumeSlider.title = 'Music Volume';
 
-  volumeContainer.appendChild(muteBtn);
-  volumeContainer.appendChild(volumeSlider);
+  const voiceBtn = document.createElement('button');
+  voiceBtn.id = 'voice-btn';
+  voiceBtn.type = 'button';
+  voiceBtn.textContent = '🗣️';
+  voiceBtn.title = 'Play/Stop Voice';
+  voiceBtn.style.cssText = muteBtn.style.cssText;
+
+  const voiceSlider = document.createElement('input');
+  voiceSlider.id = 'voice-slider';
+  voiceSlider.type = 'range';
+  voiceSlider.min = '0';
+  voiceSlider.max = '1';
+  voiceSlider.step = '0.05';
+  voiceSlider.value = String(voiceVolume);
+  voiceSlider.title = 'Voice Volume';
+  voiceSlider.style.cssText = volumeSlider.style.cssText;
+
+  // Assemble groups
+  volumeContainer.appendChild(createGroup('Voice', voiceBtn, voiceSlider));
+  volumeContainer.appendChild(createGroup('Music', muteBtn, volumeSlider));
 
   // If an undo button exists, insert before it for consistent layout
   const undoBtn = document.getElementById('undo-btn');
   if (undoBtn) toolbar.insertBefore(volumeContainer, undoBtn);
   else toolbar.appendChild(volumeContainer);
+
+  voiceBtn.addEventListener('click', () => {
+    if (window.voice) window.voice.toggle();
+  });
+
+  voiceSlider.addEventListener('input', (e) => {
+    voiceVolume = clamp01(parseFloat(e.target.value));
+    // Update active audio immediately if possible
+    if (window.voice) window.voice.setVolume(voiceVolume);
+  });
 
   muteBtn.addEventListener('click', () => {
     setMuted(!isMuted);
@@ -339,3 +394,167 @@ function clamp01(x) {
 function nearlyEqual(a, b, eps = 0.001) {
   return Math.abs(a - b) <= eps;
 }
+
+/* ============================================================================
+   VOICE ENGINE (TTS)
+   - Parses text into Narrator vs Character segments
+   - Queues audio playback
+   - Supports Browser TTS fallback + API hooks
+   ========================================================================== */
+
+class VoiceEngine {
+  constructor() {
+    this.queue = [];
+    this.isPlaying = false;
+    this.currentAudio = null;
+    this.lastText = null;
+    this.lastContext = [];
+  }
+
+  stop() {
+    this.queue = [];
+    this.isPlaying = false;
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
+    }
+    window.speechSynthesis.cancel();
+    this.updateBtn(false);
+  }
+
+  updateBtn(playing) {
+    const btn = document.getElementById('voice-btn');
+    if (btn) btn.textContent = playing ? '⏹️' : '🗣️';
+  }
+
+  setVolume(v) {
+    if (this.currentAudio) {
+      this.currentAudio.volume = v;
+    }
+  }
+
+  // Called by renderer when new text arrives.
+  // We just buffer it now; user must click to play ("Push to Go").
+  speak(text, activeCharacters = []) {
+    this.stop();
+    this.lastText = text;
+    this.lastContext = activeCharacters;
+  }
+
+  toggle() {
+    if (this.isPlaying) {
+      this.stop();
+    } else {
+      if (this.lastText) {
+        this.playText(this.lastText, this.lastContext);
+      }
+    }
+  }
+
+  // Internal: parses text and starts queue
+  playText(text, activeCharacters) {
+    this.stop();
+
+    // 1. Clean visual tags
+    const clean = (window.stripVisualTags ? window.stripVisualTags(text) : text).trim();
+    if (!clean) return;
+
+    // 2. Parse: Split by quotes to find dialogue
+    // Regex captures delimiters: ["Narrator text ", "\"Dialogue\"", " more narrator"]
+    const parts = clean.split(/([“"].*?[”"])/g).filter(p => p.trim());
+
+    for (const part of parts) {
+      const isDialogue = /^["“]/.test(part.trim());
+      // Remove quotes and markdown emphasis (* or _) so TTS doesn't read "asterisk"
+      const content = part.replace(/["“”]/g, '').replace(/[*_]+/g, '').trim();
+      if (!content) continue;
+
+      let voiceId = 'narrator';
+      
+      if (isDialogue) {
+        // Heuristic: If only 1 character is on stage, it's probably them.
+        if (activeCharacters.length === 1) {
+          voiceId = activeCharacters[0].toLowerCase();
+        } else {
+          // If multiple, we default to 'female' or 'male' generic if we can't guess.
+          // For now, let's just use a generic character voice ID.
+          voiceId = 'character_generic';
+        }
+      }
+
+      this.queue.push({ text: content, voiceId });
+    }
+
+    if (this.queue.length > 0) {
+      this.isPlaying = true;
+      this.updateBtn(true);
+      this.processQueue();
+    }
+  }
+
+  async processQueue() {
+    if (this.queue.length === 0) {
+      this.isPlaying = false;
+      this.updateBtn(false);
+      return;
+    }
+
+    this.isPlaying = true;
+    const { text, voiceId } = this.queue.shift();
+
+    try {
+      // Try Backend AI Generation first
+      const audioData = await window.api.generateSpeech(text, voiceId);
+
+      if (audioData) {
+        console.log(`[Voice] Playing AI audio for ${voiceId}`);
+        // Play AI Audio (Base64)
+        await new Promise((resolve) => {
+          // Support both full Data URIs (from Piper/New StreamElements) and legacy raw base64
+          const src = audioData.startsWith('data:') ? audioData : `data:audio/mp3;base64,${audioData}`;
+          this.currentAudio = new Audio(src);
+          this.currentAudio.volume = voiceVolume;
+          this.currentAudio.onended = resolve;
+          this.currentAudio.onerror = resolve;
+          this.currentAudio.play().catch(resolve);
+        });
+      } else {
+        console.log(`[Voice] Fallback to Browser TTS for ${voiceId}`);
+        // Fallback: Browser TTS
+        await new Promise((resolve) => {
+          const u = new SpeechSynthesisUtterance(text);
+          u.volume = voiceVolume;
+          const voices = window.speechSynthesis.getVoices();
+          
+          // Helper to find better voices (Google, Edge Natural, etc)
+          const findVoice = (terms) => voices.find(v => terms.some(t => v.name.toLowerCase().includes(t)));
+
+          // Simple mapping logic for browser voices
+          // Heuristic: List known male IDs
+          if (['narrator', 'danny', 'jake'].includes(voiceId)) {
+            // Try to find a good male voice
+            u.voice = findVoice(['google us english', 'microsoft david', 'male']) || voices[0];
+            u.pitch = voiceId === 'narrator' ? 0.9 : 1.0;
+            u.rate = voiceId === 'narrator' ? 0.85 : 0.9;
+          } else {
+            // Try to find a good female voice
+            u.voice = findVoice(['google us english', 'microsoft zira', 'female']) || voices[0];
+            // If we grabbed Google US English (often default), pitch it up slightly for female chars
+            u.pitch = 1.1;
+            u.rate = 0.8;
+          }
+          
+          u.onend = resolve;
+          u.onerror = resolve;
+          window.speechSynthesis.speak(u);
+        });
+      }
+    } catch (e) {
+      console.error("TTS Error:", e);
+    }
+
+    if (this.isPlaying) this.processQueue();
+  }
+}
+
+window.voice = new VoiceEngine();

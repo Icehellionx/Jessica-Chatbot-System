@@ -19,6 +19,7 @@
    hideSplash()
    stripVisualTags(text)
    processVisualTags(text)
+   setVisualDebugMode(enabled)
 
    Globals used by renderer.js:
    window.imageManifest
@@ -31,6 +32,9 @@
   // ---------------------------
 
   window.imageManifest = window.imageManifest || { backgrounds: {}, sprites: {}, splash: {}, music: {} };
+
+  let debugMode = false;
+  const debugLog = [];
 
   /** Map<charIdLower, HTMLImageElement> */
   const activeSprites = new Map();
@@ -89,6 +93,45 @@
     s = s.replace(/^['"\\/]+|['"\\/]+$/g, "").trim();
     return normSlashes(s);
   };
+
+  // ---------------------------
+  // Debug Overlay
+  // ---------------------------
+
+  function setVisualDebugMode(enabled) {
+    debugMode = enabled;
+    if (enabled && debugLog.length === 0) {
+      appendDebug("Visual Debug Mode Enabled", "success");
+    } else {
+      renderDebugLog();
+    }
+  }
+
+  function appendDebug(msg, type = "info") {
+    if (!debugMode) return;
+    const entry = { time: new Date().toLocaleTimeString(), msg, type };
+    debugLog.unshift(entry);
+    if (debugLog.length > 50) debugLog.pop();
+    renderDebugLog();
+  }
+
+  function renderDebugLog() {
+    let overlay = $("debug-overlay");
+    if (!overlay) {
+      const panel = $("vn-panel");
+      if (!panel) return;
+      overlay = document.createElement("div");
+      overlay.id = "debug-overlay";
+      panel.appendChild(overlay);
+    }
+    
+    if (debugMode) overlay.classList.add("active");
+    else overlay.classList.remove("active");
+
+    overlay.innerHTML = debugLog.map(e => 
+      `<div class="debug-entry debug-${e.type}">[${e.time}] ${e.msg}</div>`
+    ).join("");
+  }
 
   // ---------------------------
   // CSS Injection (idempotent)
@@ -223,6 +266,29 @@
       #setup-modal, #persona-modal, #options-modal, #summary-modal, #load-modal {
         z-index: 10001;
       }
+      #voice-modal, #confirm-modal, #lorebook-modal {
+        z-index: 10002;
+      }
+
+      /* Debug Overlay */
+      #debug-overlay {
+        position: absolute;
+        top: 10px; right: 10px;
+        width: 350px; max-height: 80%;
+        overflow-y: auto;
+        background: rgba(0, 0, 0, 0.85);
+        color: #0f0;
+        font-family: monospace; font-size: 11px;
+        padding: 10px; border-radius: 4px;
+        border: 1px solid #555;
+        z-index: 9999; pointer-events: auto;
+        display: none; white-space: pre-wrap;
+      }
+      #debug-overlay.active { display: block; }
+      .debug-entry { margin-bottom: 4px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+      .debug-error { color: #f55; }
+      .debug-success { color: #5f5; }
+      .debug-warn { color: #fa0; }
       `
     );
   }
@@ -266,6 +332,8 @@
 
     const clean = cleanTagValue(filename);
     if (!clean) return null;
+
+    if (debugMode) appendDebug(`Validating [${type}]: "${clean}"`);
 
     // Fast exact match
     if (window.imageManifest[type][clean]) return clean;
@@ -313,6 +381,10 @@
       }
     }
 
+    if (debugMode) {
+      if (best) appendDebug(`  -> Match: "${best}" (score: ${bestScore})`, "success");
+      else appendDebug(`  -> No match found for "${clean}"`, "warn");
+    }
     return best;
   }
 
@@ -324,9 +396,18 @@
     const clean = normSlashes(filename);
     const parts = clean.split("/").filter(Boolean);
 
-    // "characters/Jessica/happy.png" or "sprites/Jessica/happy.png"
-    if ((parts[0] === "characters" || parts[0] === "sprites") && parts.length >= 3) {
-      return String(parts[1]).toLowerCase();
+    // Handle standard paths: "characters/..." or "sprites/..."
+    if (parts[0] === "characters" || parts[0] === "sprites") {
+      // sprites/Jessica/happy.png -> jessica
+      if (parts.length >= 3) {
+        return String(parts[1]).toLowerCase();
+      }
+      // sprites/Jessica.png -> jessica
+      // sprites/jessica_happy.png -> jessica
+      if (parts.length === 2) {
+        const base = parts[1];
+        return base.split(/[_\-\.]/)[0].toLowerCase();
+      }
     }
 
     // "Jessica/happy.png"
@@ -347,6 +428,8 @@
     const charId = String(characterName || "").toLowerCase();
     const moodLower = String(mood || "").toLowerCase();
     if (!charId) return null;
+
+    if (debugMode) appendDebug(`Finding sprite for "${charId}" (mood: "${moodLower}")`);
 
     const spriteManifest = window.imageManifest?.sprites || {};
     const files = Object.keys(spriteManifest).filter((file) => getCharacterName(file) === charId);
@@ -370,6 +453,7 @@
       }
     }
 
+    if (debugMode && best) appendDebug(`  -> Best sprite: "${best}" (score: ${bestScore})`, "success");
     return best || files[0];
   }
 
@@ -593,11 +677,11 @@
   // NOTE: do NOT reuse global /g regex objects across calls with matchAll() without resetting lastIndex.
   // We keep the patterns as sources and compile fresh each call.
   const TAG_PATTERNS = {
-    bg: /\[BG:\s*["']?([^"\]]*)["']?\]/gi,
-    sprite: /\[SPRITE:\s*["']?([^"\]]*)["']?\]/gi,
-    splash: /\[SPLASH:\s*["']?([^"\]]*)["']?\]/gi,
-    music: /\[MUSIC:\s*["']?([^"\]]*)["']?\]/gi,
-    hide: /\[HIDE:\s*["']?([^"\]]*)["']?\]/gi,
+    bg: /\[BG:\s*([^\]]+)\]/gi,
+    sprite: /\[SPRITE:\s*([^\]]+)\]/gi,
+    splash: /\[SPLASH:\s*([^\]]+)\]/gi,
+    music: /\[MUSIC:\s*([^\]]+)\]/gi,
+    hide: /\[HIDE:\s*([^\]]+)\]/gi,
   };
 
   function stripVisualTags(text) {
@@ -618,6 +702,7 @@
   function processVisualTags(text) {
     const input = String(text || "");
     const matches = [];
+    const missing = [];
     let spriteUpdated = false;
 
     const collect = (type) => {
@@ -639,30 +724,79 @@
     if (!matches.some((m) => m.type === "splash")) hideSplash();
 
     for (const m of matches) {
-      const v = m.value;
+      let v = m.value;
+
+      if (debugMode) appendDebug(`Processing tag [${m.type}]: "${v}"`);
+
+      // Fix for LLM hallucinating descriptions inside tags (e.g. [SPRITE: "Name" looks happy])
+      // If we find a quoted string at the start, use that and ignore the rest.
+      const quoteMatch = v.match(/^\s*["']([^"']+)["']/);
+      if (quoteMatch) {
+        v = quoteMatch[1];
+      }
 
       if (m.type === "bg") {
         if (!v) continue;
         const valid = validateImage(v, "backgrounds");
-        if (valid) changeBackground(valid);
-        else console.warn(`[Visual Novel] Invalid BG tag ignored: ${v}`);
+        if (valid) {
+          if (debugMode) appendDebug(`  -> Setting BG: ${valid}`, "success");
+          changeBackground(valid);
+        } else {
+          missing.push({ type: 'bg', value: v });
+          if (debugMode) appendDebug(`  -> BG not found: ${v}`, "error");
+        }
       }
 
       if (m.type === "sprite") {
         if (!v) continue;
-        const valid = validateImage(v, "sprites");
+        let valid = validateImage(v, "sprites");
+
+        // Fallback: if not a direct file match, try treating it as a character name
+        // This handles [SPRITE: Natasha] tags used for summoning
+        if (!valid) {
+          let name = v;
+          let mood = "default";
+
+          if (v.includes("/")) {
+            const parts = v.split("/");
+            mood = parts.pop();
+            name = parts.join("/");
+          } else if (v.includes("_")) {
+            const parts = v.split("_");
+            mood = parts.pop();
+            name = parts.join("_");
+          }
+
+          name = getCharacterName(name);
+          mood = cleanTagValue(mood);
+          if (mood.toLowerCase() === name) mood = "default";
+
+          const best = findBestSprite(name, mood);
+          if (best) {
+            valid = best;
+            if (debugMode) appendDebug(`  -> Fallback found: ${best}`, "info");
+          }
+        }
+
         if (valid) {
           updateSprite(valid);
           spriteUpdated = true;
+          if (debugMode) appendDebug(`  -> Sprite updated: ${valid}`, "success");
         }
-        else console.warn(`[Visual Novel] Invalid SPRITE tag ignored: ${v}`);
+        else {
+          console.warn(`[Visual Novel] Invalid SPRITE tag ignored: ${v}`);
+          if (debugMode) appendDebug(`  -> Sprite not found: ${v}`, "error");
+        }
       }
 
       if (m.type === "splash") {
         if (!v) continue;
         const valid = validateImage(v, "splash");
         if (valid) showSplash(valid);
-        else console.warn(`[Visual Novel] Invalid SPLASH tag ignored: ${v}`);
+        else {
+          console.warn(`[Visual Novel] Invalid SPLASH tag ignored: ${v}`);
+          if (debugMode) appendDebug(`  -> Splash not found: ${v}`, "error");
+        }
       }
 
       if (m.type === "music") {
@@ -673,16 +807,20 @@
         }
         const valid = validateImage(v, "music");
         if (valid) playMusic(valid);
-        else console.warn(`[Visual Novel] Invalid MUSIC tag ignored: ${v}`);
+        else {
+          console.warn(`[Visual Novel] Invalid MUSIC tag ignored: ${v}`);
+          if (debugMode) appendDebug(`  -> Music not found: ${v}`, "error");
+        }
       }
 
       if (m.type === "hide") {
         if (!v) continue;
         hideSprite(v);
+        if (debugMode) appendDebug(`  -> Hiding: ${v}`);
       }
     }
 
-    return { text: stripVisualTags(input), stats: { spriteUpdated } };
+    return { text: stripVisualTags(input), stats: { spriteUpdated }, missing };
   }
 
   // ---------------------------
@@ -706,6 +844,7 @@
 
   window.stripVisualTags = stripVisualTags;
   window.processVisualTags = processVisualTags;
+  window.setVisualDebugMode = setVisualDebugMode;
 
   // If other scripts relied on activeSprites directly, this keeps compatibility:
   window.__activeSprites = activeSprites;

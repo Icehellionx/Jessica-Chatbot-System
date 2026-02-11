@@ -1,9 +1,12 @@
 'use strict';
 
-const { ipcMain } = require('electron');
+const { ipcMain, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const aiService = require('./ai_services');
+const axios = require('axios');
+const { execFile } = require('child_process');
+const os = require('os');
 
 /* ============================================================================
    IPC MAIN HANDLERS (Electron)
@@ -307,34 +310,55 @@ function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, r
   const splashes = filterRelevantAssets(listCategoryFiles({ botImagesPath, botFilesPath }, 'splash'), recentText);
   const music = filterRelevantAssets(listCategoryFiles({ botImagesPath, botFilesPath }, 'music'), recentText);
 
-  let sprites = listCategoryFiles({ botImagesPath, botFilesPath }, 'sprites');
+  // --- Sprite Filtering Logic ---
+  const allSprites = listCategoryFiles({ botImagesPath, botFilesPath }, 'sprites');
+  const activeChars = new Set((options.activeCharacters || []).map(c => String(c).toLowerCase()));
+  
+  const visibleSprites = [];
+  const availableGroups = new Set();
 
-  // Optional filter: only sprites for active characters
-  if (Array.isArray(options?.activeCharacters) && options.activeCharacters.length) {
-    const activeSet = new Set(options.activeCharacters.map(c => String(c).toLowerCase()));
-    sprites = sprites.filter(file => {
-      const parts = file.split(/[/\\]/);
-      // sprites/<char>/... OR characters/<char>/...
-      return parts.length > 2 ? activeSet.has(String(parts[1]).toLowerCase()) : true;
-    });
+  for (const file of allSprites) {
+    const parts = file.split('/');
+    parts.pop(); // remove filename to look at directory structure
+    
+    let group = 'Common';
+    if (parts.length > 0) {
+      const first = parts[0];
+      if (SPRITES_SPECIAL_PREFIXES.has(first) && parts.length > 1) group = parts[1];
+      else group = parts[parts.length - 1];
+    }
+
+    availableGroups.add(group);
+
+    // If group is Common or Active, include it
+    if (group === 'Common' || activeChars.has(group.toLowerCase())) {
+      visibleSprites.push(file);
+    }
   }
+  
+  // Calculate inactive characters (Available but not shown)
+  const inactiveChars = [...availableGroups].filter(g => g !== 'Common' && !activeChars.has(g.toLowerCase())).sort();
 
   const bgList = createTreeList(backgrounds, 'backgrounds', manifest);
-  const spriteList = createTreeList(sprites, 'sprites', manifest);
+  const spriteList = createTreeList(visibleSprites, 'sprites', manifest);
   const splashList = createTreeList(splashes, 'splash', manifest);
   const musicList = createTreeList(music, 'music', manifest);
 
-  if (!bgList && !spriteList && !splashList && !musicList) return '';
-
   let visualPrompt = `\n[VISUAL NOVEL MODE]`;
   if (bgList) visualPrompt += `\nBackgrounds:\n${bgList}`;
-  if (spriteList) visualPrompt += `\nSprites:\n${spriteList}`;
+  
+  if (spriteList) visualPrompt += `\nSprites (Active):\n${spriteList}`;
+  
+  if (inactiveChars.length > 0) {
+    visualPrompt += `\nCharacters (Inactive - Summon with [SPRITE: Name]):\n${inactiveChars.join(', ')}`;
+  }
+
   if (splashList) visualPrompt += `\nSplash Art:\n${splashList}`;
   if (musicList) visualPrompt += `\nMusic:\n${musicList}`;
 
   visualPrompt += `\n\nINSTRUCTIONS:
 1. Output visual tags ONLY at the start or end of the message.
-2. [BG: "name"] changes background.
+2. [BG: "name"] changes background. If the location is new, invent a descriptive name (e.g. "zoo_entrance", "sunny_beach").
 3. [SPRITE: "Char/Name"] updates character.
 4. [SPLASH: "name"] overrides all.
 5. [MUSIC: "name"] plays background music.
@@ -364,27 +388,112 @@ function buildStateInjection(characterState, activeCharacters) {
   return out === `\n\n[CURRENT CHARACTER STATES (DYNAMIC)]` ? '' : out;
 }
 
-function buildLoreInjection(lorebook, recentMessages) {
+/* ------------------------------ SEMANTIC LORE ---------------------------- */
+
+const loreEmbeddingCache = new Map(); // text -> number[]
+let embeddingsLoaded = false;
+
+function loadEmbeddings(filePath) {
+  if (embeddingsLoaded) return;
+  const data = readJsonSafe(filePath, {});
+  for (const [k, v] of Object.entries(data)) {
+    loreEmbeddingCache.set(k, v);
+  }
+  embeddingsLoaded = true;
+}
+
+function saveEmbeddings(filePath) {
+  const obj = Object.fromEntries(loreEmbeddingCache);
+  writeJsonSafe(filePath, obj);
+}
+
+function cosineSimilarity(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dot += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function buildLoreInjection(lorebook, recentMessages, config, embeddingsPath) {
   if (!Array.isArray(lorebook) || !lorebook.length) return '';
 
+  // Load cache from disk if not already loaded
+  if (embeddingsPath) loadEmbeddings(embeddingsPath);
+
+  // 1. Prepare Query
   const recentText = recentMessages
-    .slice(-3)
+    .slice(-2) // Use last 2 messages for context
     .map(m => String(m?.content ?? '').toLowerCase())
-    .join(' ');
+    .join('\n');
+
+  if (!recentText.trim()) return '';
+
+  // 2. Get Query Embedding
+  const queryEmbedding = await aiService.generateEmbedding(config, recentText);
+  
+  // Fallback to simple keyword matching if embeddings fail (e.g. no API support)
+  if (!queryEmbedding) {
+    return buildLoreInjectionKeywords(lorebook, recentText);
+  }
+
+  // 3. Identify & Fetch Missing Embeddings (Parallel)
+  const missing = [];
+  for (const entry of lorebook) {
+    const text = entry?.scenario || entry?.entry;
+    if (text && !loreEmbeddingCache.has(text)) {
+      missing.push(text);
+    }
+  }
+
+  if (missing.length > 0) {
+    console.log(`[RAG] Generating embeddings for ${missing.length} new lore entries...`);
+    await Promise.all(missing.map(async (text) => {
+      const emb = await aiService.generateEmbedding(config, text);
+      if (emb) loreEmbeddingCache.set(text, emb);
+    }));
+    if (embeddingsPath) saveEmbeddings(embeddingsPath);
+  }
 
   let lines = [];
+  const candidates = [];
 
+  for (const entry of lorebook) {
+    const text = entry?.scenario || entry?.entry;
+    if (!text) continue;
+
+    // Get Embedding (now guaranteed to be in cache if generation succeeded)
+    let embedding = loreEmbeddingCache.get(text);
+    if (embedding) {
+      const score = cosineSimilarity(queryEmbedding, embedding);
+      // Threshold: 0.5 is usually decent for RAG, adjust as needed
+      if (score > 0.5) {
+        candidates.push({ text, score });
+      }
+    }
+  }
+
+  // Sort by relevance and take top 3
+  candidates.sort((a, b) => b.score - a.score);
+  lines = candidates.slice(0, 3).map(c => `- ${c.text}`);
+
+  return lines.length ? `\n\n[RELEVANT LORE (Semantic)]\n${lines.join('\n')}` : '';
+}
+
+// Legacy keyword fallback
+function buildLoreInjectionKeywords(lorebook, recentText) {
+  const lines = [];
   for (const entry of lorebook) {
     const keywords = entry?.keywords;
     if (!Array.isArray(keywords) || !keywords.length) continue;
-
-    const hit = keywords.some(k => recentText.includes(String(k).toLowerCase()));
-    if (!hit) continue;
-
-    const text = entry?.scenario || entry?.entry;
-    if (text) lines.push(`- ${text}`);
+    if (keywords.some(k => recentText.includes(String(k).toLowerCase()))) {
+      const text = entry?.scenario || entry?.entry;
+      if (text) lines.push(`- ${text}`);
+    }
   }
-
   return lines.length ? `\n\n[RELEVANT LORE]\n${lines.join('\n')}` : '';
 }
 
@@ -443,6 +552,201 @@ function applyContextWindow(messages, { maxContext, systemSuffix }) {
   return out;
 }
 
+/* ------------------------------ AUDIO ANALYSIS --------------------------- */
+
+function getWavSamples(buffer) {
+  // Simple WAV parser for 16-bit mono/stereo
+  if (buffer.length < 44) return null;
+  
+  const channels = buffer.readUInt16LE(22);
+  const sampleRate = buffer.readUInt32LE(24);
+  const bitsPerSample = buffer.readUInt16LE(34);
+  
+  if (bitsPerSample !== 16) return null; 
+
+  // Find data chunk
+  let offset = 12;
+  while (offset < buffer.length - 8) {
+    const chunkId = buffer.toString('ascii', offset, offset + 4);
+    const chunkSize = buffer.readUInt32LE(offset + 4);
+    if (chunkId === 'data') {
+      offset += 8;
+      const samples = [];
+      // Read up to 2.0 seconds of audio for analysis (skip silence/short clips)
+      const maxSamples = sampleRate * 2.0;
+      const end = Math.min(offset + chunkSize, offset + maxSamples * 2 * channels);
+      
+      for (let i = offset; i < end; i += 2 * channels) {
+        // Read Int16, normalize to -1..1
+        const val = buffer.readInt16LE(i) / 32768.0;
+        samples.push(val);
+      }
+      if (samples.length === 0) return null;
+      return { sampleRate, samples };
+    }
+    offset += 8 + chunkSize;
+  }
+  return null;
+}
+
+function estimatePitch(samples, sampleRate) {
+  // 1. Find the loudest 100ms window to avoid silence
+  const windowSize = Math.floor(sampleRate * 0.1); 
+  if (samples.length < windowSize) return 0;
+
+  let maxRMS = 0;
+  let bestOffset = 0;
+  const step = Math.floor(windowSize / 2);
+
+  for (let i = 0; i < samples.length - windowSize; i += step) {
+    let sumSq = 0;
+    for (let j = 0; j < windowSize; j++) {
+      const s = samples[i + j];
+      sumSq += s * s;
+    }
+    const rms = Math.sqrt(sumSq / windowSize);
+    if (rms > maxRMS) { maxRMS = rms; bestOffset = i; }
+  }
+
+  if (maxRMS < 0.02) return 0; // Too quiet
+  const slice = samples.slice(bestOffset, bestOffset + windowSize);
+  
+  const minPeriod = Math.floor(sampleRate / 400); // Max freq 400Hz
+  const maxPeriod = Math.floor(sampleRate / 70);  // Min freq 70Hz
+
+  let bestPeriod = 0;
+  let maxCorr = -Infinity;
+
+  for (let period = minPeriod; period <= maxPeriod; period++) {
+    let sum = 0;
+    const n = slice.length - period;
+    for (let i = 0; i < n; i++) {
+      sum += slice[i] * slice[i + period];
+    }
+    
+    // Normalize by number of terms to avoid bias toward small lags
+    const corr = sum / n;
+
+    if (corr > maxCorr) {
+      maxCorr = corr;
+      bestPeriod = period;
+    }
+  }
+  
+  if (bestPeriod === 0) return 0;
+  return sampleRate / bestPeriod;
+}
+
+async function checkVoiceGender(piperPath, modelPath, cwd, speakerId, targetGender, tempDir) {
+  const tempFile = path.join(tempDir, `pitch_test_${Date.now()}_${speakerId}.wav`);
+  try {
+    await new Promise((resolve, reject) => {
+       // Use a longer phrase to ensure we catch the pitch
+       const phrase = "This is a longer sentence to ensure we have enough audio data to detect the pitch accurately.";
+       const child = execFile(piperPath, ['--model', modelPath, '--speaker', String(speakerId), '--output_file', tempFile], { cwd, windowsHide: true }, (err) => err ? reject(err) : resolve());
+       if (child.stdin) { child.stdin.write(phrase); child.stdin.end(); }
+    });
+
+    if (!fs.existsSync(tempFile)) return false;
+
+    const buffer = await fs.promises.readFile(tempFile);
+    try { await fs.promises.unlink(tempFile); } catch {}
+    
+    const wav = getWavSamples(buffer);
+    if (!wav) return false;
+    if (!wav || wav.samples.length === 0) return false;
+
+    const pitch = estimatePitch(wav.samples, wav.sampleRate);
+    return pitch; // Return raw pitch for comparison
+  } catch (e) {
+    return 0;
+  }
+}
+
+function getVoiceBuckets(voiceBucketsPath) {
+  return readJsonSafe(voiceBucketsPath, { male: [], female: [] });
+}
+
+/* ------------------------------ VOICE ASSIGNMENT ------------------------- */
+
+function getVoiceMap(voiceMapPath, botFilesPath) {
+  const map = readJsonSafe(voiceMapPath, {
+    // Default seeds (preserve your existing hardcoded preferences)
+    narrator: 0,
+    jessica: 10,
+    danny: 20,
+    jake: 30,
+    natasha: 40,
+    suzie: 50,
+    character_generic: 5
+  });
+
+  // Override with voice.txt from character folders if available
+  if (botFilesPath) {
+    try {
+      const charDir = path.join(botFilesPath, 'characters');
+      if (fs.existsSync(charDir)) {
+        const entries = fs.readdirSync(charDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const voicePath = path.join(charDir, entry.name, 'voice.txt');
+            if (fs.existsSync(voicePath)) {
+              const content = fs.readFileSync(voicePath, 'utf8').trim();
+              const id = parseInt(content, 10);
+              if (!isNaN(id)) {
+                map[entry.name.toLowerCase()] = id;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) { /* ignore scan errors */ }
+  }
+  return map;
+}
+
+function detectGender(charName, botFilesPath) {
+  try {
+    // Find folder case-insensitively
+    const charDir = path.join(botFilesPath, 'characters');
+    if (!fs.existsSync(charDir)) return 'unknown';
+    
+    const entry = fs.readdirSync(charDir).find(f => f.toLowerCase() === charName.toLowerCase());
+    if (!entry) return 'unknown';
+
+    const pPath = path.join(charDir, entry, 'personality.txt');
+    const text = readTextSafe(pPath, '').toLowerCase();
+
+    if (text.includes('female') || text.includes('woman') || text.includes('she/her') || text.includes('girl')) return 'F';
+    if (text.includes('male') || text.includes('man') || text.includes('he/him') || text.includes('boy')) return 'M';
+    
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function assignVoiceId(charName, botFilesPath, existingMap, buckets) {
+  // 1. Detect Gender
+  const gender = detectGender(charName, botFilesPath);
+
+  // 2. Pick from Buckets if available
+  let hash = 0;
+  for (let i = 0; i < charName.length; i++) hash = charName.charCodeAt(i) + ((hash << 5) - hash);
+  hash = Math.abs(hash);
+
+  if (gender === 'F' && buckets.female.length > 0) {
+    return buckets.female[hash % buckets.female.length];
+  }
+  if (gender === 'M' && buckets.male.length > 0) {
+    return buckets.male[hash % buckets.male.length];
+  }
+
+  // 3. Fallback to random ID if buckets empty
+  // Libritts has ~900 speakers. Pick one deterministically if we have to fallback.
+  return hash % 900;
+}
+
 function structuredCloneSafe(x) {
   try {
     return structuredClone(x);
@@ -465,6 +769,8 @@ module.exports = function registerIpcHandlers(paths) {
     advancedPromptPath,
     characterStatePath,
     lorebookPath,
+    voiceMapPath,
+    voiceBucketsPath,
   } = paths;
 
   const cache = createCache();
@@ -583,6 +889,81 @@ module.exports = function registerIpcHandlers(paths) {
     const c = loadConfig();
     c.maxContext = Number.parseInt(l, 10);
     return saveConfig(c);
+  });
+
+  ipcMain.handle('clear-voice-map', () => {
+    try {
+      if (fs.existsSync(voiceMapPath)) fs.unlinkSync(voiceMapPath);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('get-voice-map', () => getVoiceMap(voiceMapPath, botFilesPath));
+  
+  ipcMain.handle('save-voice-map', (_e, map) => {
+    writeJsonSafe(voiceMapPath, map);
+    return true;
+  });
+
+  ipcMain.handle('scan-voice-buckets', async () => {
+    // Reset buckets to ensure clean state
+    const buckets = { male: [], female: [] };
+    const piperDir = path.resolve(botFilesPath, '../tools/piper');
+    const piperBinary = process.platform === 'win32' ? 'piper.exe' : 'piper';
+    const piperPath = path.join(piperDir, piperBinary);
+    
+    // Auto-detect model
+    let modelName = 'en_US-libritts_r-medium.onnx';
+    if (!fs.existsSync(path.join(piperDir, modelName))) {
+      const found = fs.readdirSync(piperDir).find(f => f.endsWith('.onnx'));
+      if (found) modelName = found;
+    }
+    const modelPath = path.join(piperDir, modelName);
+
+    if (!fs.existsSync(piperPath) || !fs.existsSync(modelPath)) return { success: false, message: "Piper not found" };
+
+    // 1. Try Name-Based Bucketing from Config (Fastest)
+    let jsonPath = modelPath + '.json';
+    if (!fs.existsSync(jsonPath)) jsonPath = modelPath.replace(/\.onnx$/, '.json');
+    
+    let added = 0;
+    let method = "Pitch Scan";
+
+    if (fs.existsSync(jsonPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+        if (config.speaker_id_map) {
+          for (const [name, id] of Object.entries(config.speaker_id_map)) {
+            const lower = name.toLowerCase();
+            // Heuristics based on user provided list + common names
+            if (lower.match(/^f\d+$/) || ['belinda', 'alicia', 'anika', 'annie', 'linda', 'shelby', 'steph', 'whisperf', 'salli', 'amy', 'kimberly'].includes(lower)) {
+              buckets.female.push(id);
+              added++;
+            } else if (lower.match(/^m\d+$/) || ['adam', 'alex', 'andy', 'boris', 'david', 'edward', 'gene', 'john', 'mike', 'paul', 'robert', 'travis', 'joey', 'brian', 'matthew'].includes(lower)) {
+              buckets.male.push(id);
+              added++;
+            }
+          }
+          if (added > 0) method = "Name Map";
+        }
+      } catch (e) { console.error("Config parse error", e); }
+    }
+
+    // 2. Fallback to Pitch Scan if no names found (e.g. raw Libritts)
+    if (added === 0) {
+      // Scan 50 random IDs
+      for (let i = 0; i < 50; i++) {
+        const id = Math.floor(Math.random() * 900);
+        const pitch = await checkVoiceGender(piperPath, modelPath, piperDir, id, 'X', paths.userDataPath);
+        if (pitch > 175) { buckets.female.push(id); added++; }
+        else if (pitch > 60 && pitch < 155) { buckets.male.push(id); added++; }
+      }
+    }
+
+    writeJsonSafe(voiceBucketsPath, buckets);
+    return { success: true, message: `Method: ${method}. Added ${added} voices to buckets.` };
   });
 
   /* ------------------------------ IPC: FILES ----------------------------- */
@@ -847,6 +1228,243 @@ Output a JSON object keyed by character name containing these fields.`;
   });
 
   /**
+   * Image Generation (Pollinations.ai)
+   * Uses a free remote API so no local installation is required.
+   * Perfect for distributing the app to others.
+   */
+  ipcMain.handle('generate-image', async (_event, prompt, type) => {
+    try {
+      // Construct prompt for anime style backgrounds
+      const enhancedPrompt = `(masterpiece, best quality), ${prompt}, detailed scenery, visual novel background, style of Makoto Shinkai, anime style, no characters`;
+      const encodedPrompt = encodeURIComponent(enhancedPrompt);
+      const seed = Math.floor(Math.random() * 1000000);
+      
+      // Pollinations API (Free, No Key)
+      // We request flux model for better quality
+      const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=576&seed=${seed}&nologo=true&model=flux`;
+
+      console.log(`[Image Gen] Fetching from: ${url}`);
+      const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
+      
+      if (response.data) {
+        // 2. Process & Compress
+        const buffer = Buffer.from(response.data);
+        const img = nativeImage.createFromBuffer(buffer);
+        const jpegBuffer = img.toJPEG(80); // 80% quality saves ~90% disk space
+
+        // 3. Save
+        const genDir = path.join(botImagesPath, 'backgrounds', 'generated');
+        fs.mkdirSync(genDir, { recursive: true });
+        
+        const filename = `gen_${Date.now()}_${sanitizeFilename(prompt).slice(0, 20)}.jpg`;
+        const absPath = path.join(genDir, filename);
+        const relPath = `backgrounds/generated/${filename}`;
+        
+        fs.writeFileSync(absPath, jpegBuffer);
+
+        // Prune old generated backgrounds (keep last 15)
+        try {
+          const MAX_GENERATED = 15;
+          const files = fs.readdirSync(genDir).filter(f => f.startsWith('gen_'));
+          
+          if (files.length > MAX_GENERATED) {
+            // Sort by filename (timestamp is prefix, so lexicographical = chronological)
+            files.sort();
+            const toDelete = files.slice(0, files.length - MAX_GENERATED);
+            for (const f of toDelete) {
+              fs.unlinkSync(path.join(genDir, f));
+            }
+            console.log(`[Image Gen] Pruned ${toDelete.length} old background(s).`);
+          }
+        } catch (e) {
+          console.warn("[Image Gen] Pruning error:", e);
+        }
+        
+        // 4. Update Cache
+        cache.invalidate('files:backgrounds');
+        return relPath;
+      }
+    } catch (e) {
+      console.error("Image Gen Error:", e.message);
+    }
+    return null;
+  });
+
+  /**
+   * TTS Generation
+   * Returns base64 MP3 data or null (to fallback to browser TTS).
+   */
+  ipcMain.handle('generate-speech', async (_event, text, voiceId, forcedSpeakerId) => {
+    let audioData = null;
+    let piperError = null;
+
+    // 1. Try Local Piper TTS (Offline, Neural)
+    // Checks for: bot/tools/piper/piper.exe (Windows) or piper (Linux/Mac)
+    // and a voice model.
+    try {
+      // Resolve path: bot/files -> bot/tools/piper
+      const piperDir = path.resolve(botFilesPath, '../tools/piper');
+      const piperBinary = process.platform === 'win32' ? 'piper.exe' : 'piper';
+      const piperPath = path.join(piperDir, piperBinary);
+
+      if (fs.existsSync(piperPath)) {
+        // 1. Auto-detect model if default name isn't found
+        let modelName = 'en_US-libritts_r-medium.onnx';
+        if (!fs.existsSync(path.join(piperDir, modelName))) {
+          const found = fs.readdirSync(piperDir).find(f => f.endsWith('.onnx'));
+          if (found) modelName = found;
+        }
+
+        const modelPath = path.join(piperDir, modelName);
+        
+        // 1b. Check for config file (could be .onnx.json OR just .json)
+        let jsonPath = modelPath + '.json';
+        if (!fs.existsSync(jsonPath)) jsonPath = modelPath.replace(/\.onnx$/, '.json');
+
+        if (fs.existsSync(modelPath) && fs.existsSync(jsonPath)) {
+          // 2. Check if model supports multiple speakers
+          let isMultiSpeaker = false;
+          try {
+            const config = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+            // Check both num_speakers and speaker_id_map to be safe
+            isMultiSpeaker = (config.num_speakers > 1) || (config.speaker_id_map && Object.keys(config.speaker_id_map).length > 0);
+            console.log(`[Piper] Model: ${modelName}, Multi-Speaker: ${isMultiSpeaker}`);
+          } catch (e) {
+            console.log("[Piper] Config read error, defaulting to single speaker:", e.message);
+          }
+
+          // Use a temp file to avoid stdout binary corruption (static noise)
+          const tempFile = path.join(paths.userDataPath, `vn_tts_${Date.now()}.wav`);
+          // --length_scale 1.1 slows speech down by ~10%
+          const args = ['--model', modelPath, '--output_file', tempFile, '--length_scale', '1.1'];
+
+          if (isMultiSpeaker) {
+            let spkId;
+            
+            if (forcedSpeakerId !== undefined && forcedSpeakerId !== null) {
+              spkId = String(forcedSpeakerId);
+              console.log(`[Piper] Using forced Speaker ID: ${spkId}`);
+            } else {
+              // Dynamic Voice Assignment
+              let voiceMap = getVoiceMap(voiceMapPath, botFilesPath);
+              let buckets = getVoiceBuckets(voiceBucketsPath);
+              
+              if (voiceMap[voiceId] === undefined) {
+                // Assign from buckets if possible, otherwise fallback to hash
+                voiceMap[voiceId] = assignVoiceId(voiceId, botFilesPath, voiceMap, buckets);
+                writeJsonSafe(voiceMapPath, voiceMap);
+              }
+              spkId = String(voiceMap[voiceId]);
+              console.log(`[Piper] Generating for "${voiceId}" -> Speaker ID: ${spkId}`);
+            }
+
+            args.push('--speaker', spkId);
+          } else {
+            console.log("[Piper] Single speaker model detected. Ignoring voice map.");
+          }
+
+          console.log(`[Piper] Executing: ${piperBinary} ${args.join(' ')}`);
+          audioData = await new Promise((resolve, reject) => {
+            const child = execFile(
+              piperPath, 
+              args, 
+              { 
+                cwd: piperDir, // Important: Run inside dir so it finds dlls/config
+                windowsHide: true
+              }, 
+              async (err, stdout, stderr) => {
+                if (err) {
+                  console.warn("[Piper] Execution Error:", err);
+                  if (stderr) console.warn("[Piper] Stderr:", stderr.toString());
+                  reject(new Error(`Piper exited with error: ${err.message}. Stderr: ${stderr ? stderr.toString() : ''}`));
+                  return;
+                }
+
+                try {
+                  if (fs.existsSync(tempFile)) {
+                    const audioBuffer = await fs.promises.readFile(tempFile);
+                    try { await fs.promises.unlink(tempFile); } catch {} // Clean up
+
+                    if (audioBuffer.length >= 4 && audioBuffer.toString('utf8', 0, 4) === 'RIFF') {
+                      resolve(`data:audio/wav;base64,${audioBuffer.toString('base64')}`);
+                    } else {
+                      reject(new Error("Piper output file was not a valid WAV."));
+                    }
+                  } else {
+                    reject(new Error(`Piper produced no output file. Stderr: ${stderr ? stderr.toString() : ''}`));
+                  }
+                } catch (e) {
+                  reject(new Error(`Failed to read Piper output: ${e.message}`));
+                }
+              }
+            );
+            
+            if (child.stdin) {
+              child.stdin.write(text);
+              child.stdin.end();
+            }
+          }).catch(e => {
+            piperError = e;
+            return null;
+          });
+        } else {
+          console.log(`[Piper] Missing files! Found .onnx: ${fs.existsSync(modelPath)}, Found .json: ${fs.existsSync(jsonPath)}`);
+          piperError = new Error("Piper model files (.onnx or .json) missing.");
+        }
+      } else {
+        // console.log(`[Piper] Binary not found at ${piperPath}`);
+        piperError = new Error(`Piper binary not found at ${piperPath}`);
+      }
+    } catch (e) {
+      console.log("[Piper] Setup failed:", e.message);
+      piperError = e;
+    }
+
+    if (audioData) return audioData;
+
+    // StreamElements TTS (Free, High Quality Wavenet)
+    // No API key required. Works "inside the program" via public API.
+    
+    const SE_VOICE_MAP = {
+      narrator: 'Matthew', // Deep US Male
+      jessica: 'Salli',    // Clear US Female
+      danny: 'Joey',       // US Male
+      jake: 'Brian',       // British Male (The classic "Streamer" voice, fits a nerd archetype)
+      natasha: 'Amy',      // British Female (Sophisticated)
+      suzie: 'Kimberly',   // Higher pitch US Female
+      character_generic: 'Joanna' 
+    };
+
+    const seVoice = SE_VOICE_MAP[voiceId] || 'Joanna';
+
+    try {
+      // Fetch MP3 from StreamElements
+      const url = 'https://api.streamelements.com/kappa/v2/speech';
+      const response = await axios.get(url, {
+        params: {
+          voice: seVoice,
+          text: text
+        },
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        responseType: 'arraybuffer'
+      });
+      
+      // Verify content type to avoid playing error HTML as audio
+      if (response.headers['content-type']?.includes('audio')) {
+        return `data:audio/mp3;base64,${Buffer.from(response.data).toString('base64')}`;
+      } else {
+        console.warn("[StreamElements] API returned non-audio:", response.headers['content-type']);
+      }
+    } catch (e) {
+      console.warn("StreamElements TTS failed (offline?), falling back to browser:", e.message);
+    }
+
+    // If we are here, both methods failed. Throw the Piper error if it existed, as that's likely what the user is debugging.
+    if (piperError) throw piperError;
+    throw new Error("Audio generation failed (Piper missing/broken and StreamElements unreachable).");
+  });
+
+  /**
    * Main chat send:
    * - Builds VN visual prompt
    * - Injects enforcement + state + lore + advanced prompt
@@ -878,8 +1496,10 @@ Output a JSON object keyed by character name containing these fields.`;
     const characterState = readJsonSafe(characterStatePath, {});
     const lorebook = readJsonSafe(lorebookPath, []);
 
+    const loreEmbeddingsPath = path.join(paths.userDataPath, 'aura_lorebook_embeddings.json');
+
     const stateInjection = buildStateInjection(characterState, options?.activeCharacters);
-    const loreInjection = buildLoreInjection(lorebook, messagesCopy);
+    const loreInjection = await buildLoreInjection(lorebook, messagesCopy, config, loreEmbeddingsPath);
 
     const advancedPromptContent = readTextSafe(advancedPromptPath, '').trim();
 
