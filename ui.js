@@ -56,6 +56,8 @@
       confirmResolve(Boolean(value));
       confirmResolve = null;
     }
+    // Restore focus to chat input after any confirm modal closes
+    window.refocusInput?.();
   };
 
   confirmYesBtn?.addEventListener("click", () => closeConfirm(true));

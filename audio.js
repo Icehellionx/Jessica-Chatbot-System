@@ -617,7 +617,6 @@ class VoiceEngine {
           u.rate = 0.8;
         }
         
-        u.onend = resolve;
         u.onend = () => { if (window.setCharSpeaking) window.setCharSpeaking(voiceId, false); resolve(); };
         u.onerror = resolve;
         window.speechSynthesis.speak(u);

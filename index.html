@@ -426,11 +426,26 @@
         <span class="toolbar-label">Theater</span>
         <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
       </div>
-      <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
-      <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
-      <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
-      <button id="tree-btn" class="tool-btn" type="button" title="Branch Tree">🌳 Tree</button>
-      <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️ Options</button>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Undo</span>
+        <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶</button>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Redo</span>
+        <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻</button>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Reset</span>
+        <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻</button>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Tree</span>
+        <button id="tree-btn" class="tool-btn" type="button" title="Branch Tree">🌳</button>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Options</span>
+        <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️</button>
+      </div>
     </div>
 
     <div id="chat-history" aria-live="polite" aria-label="Chat messages"></div>
