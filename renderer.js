@@ -476,6 +476,36 @@ function buildSystemPrompt(sceneCharacters) {
     systemContent += `\n\n[STORY SUMMARY]\n${window.chatSummary.content}`;
   }
 
+  // --- ASSET MANIFEST (Available assets for tag selection) ---
+  const manifest = window.imageManifest || {};
+  const assetLines = [];
+
+  if (manifest.backgrounds) {
+    const bgNames = Object.keys(manifest.backgrounds).map(k => k.split(/[/\\]/).pop().split('.')[0]).filter(Boolean);
+    if (bgNames.length) assetLines.push(`Backgrounds: ${bgNames.join(', ')}`);
+  }
+  if (manifest.sprites) {
+    const spritesByChar = {};
+    for (const key of Object.keys(manifest.sprites)) {
+      const charName = key.split(/[/\\]/)[0] || key.split('_')[0];
+      const fileName = key.split(/[/\\]/).pop().split('.')[0];
+      const char = charName.toLowerCase();
+      if (!spritesByChar[char]) spritesByChar[char] = [];
+      const expression = fileName.toLowerCase().replace(char, '').replace(/^[_\-\s]+/, '') || 'default';
+      if (!spritesByChar[char].includes(expression)) spritesByChar[char].push(expression);
+    }
+    for (const [char, expressions] of Object.entries(spritesByChar)) {
+      assetLines.push(`${char} expressions: ${expressions.join(', ')}`);
+    }
+  }
+  if (manifest.music) {
+    const musicNames = Object.keys(manifest.music).map(k => k.split(/[/\\]/).pop().split('.')[0]).filter(Boolean);
+    if (musicNames.length) assetLines.push(`Music: ${musicNames.join(', ')}`);
+  }
+  if (assetLines.length) {
+    systemContent += `\n\n[AVAILABLE ASSETS]\n${assetLines.join('\n')}\n(Use these exact names in your visual tags for best results)`;
+  }
+
   // --- RENDER FEEDBACK (Self-Correction) ---
   // Check the last assistant message for any visual mismatches
   const lastAssistant = window.messages.slice().reverse().find(m => m.role === 'assistant');

@@ -777,6 +777,9 @@
     const missing = [];
     let spriteUpdated = false;
 
+    // Render report: tracks requested vs actual for feedback loop
+    const report = { sprites: [], backgrounds: [], music: [], effects: [], mismatches: [] };
+
     const collect = (type) => {
       const re = new RegExp(TAG_PATTERNS[type].source, "gi");
       for (const m of input.matchAll(re)) {
@@ -814,8 +817,17 @@
         if (valid) {
           if (debugMode) appendDebug(`  -> Setting BG: ${valid}`, "success");
           changeBackground(valid);
+          const cleanReq = cleanTagValue(v).toLowerCase();
+          const cleanMatch = stripExt(valid.split(/[/\\]/).pop()).toLowerCase();
+          const isExact = cleanMatch.includes(cleanReq) || cleanReq.includes(cleanMatch);
+          report.backgrounds.push({ requested: v, matched: valid, exact: isExact });
+          if (!isExact) {
+            report.mismatches.push(`Background: requested "${v}" but closest match was "${stripExt(valid.split(/[/\\]/).pop())}"`);
+          }
         } else {
           missing.push({ type: 'bg', value: v });
+          report.backgrounds.push({ requested: v, matched: null, exact: false });
+          report.mismatches.push(`Background: "${v}" not found — AI generation triggered or using fallback`);
           if (debugMode) appendDebug(`  -> BG not found: ${v}`, "error");
         }
       }
@@ -855,9 +867,18 @@
           updateSprite(valid);
           spriteUpdated = true;
           if (debugMode) appendDebug(`  -> Sprite updated: ${valid}`, "success");
+          const cleanReq = cleanTagValue(v).toLowerCase();
+          const cleanMatch = stripExt(valid.split(/[/\\]/).pop()).toLowerCase();
+          const isExact = cleanMatch.includes(cleanReq) || cleanReq.includes(cleanMatch);
+          report.sprites.push({ requested: v, matched: valid, exact: isExact });
+          if (!isExact) {
+            report.mismatches.push(`Sprite: requested "${v}" but resolved to "${stripExt(valid.split(/[/\\]/).pop())}"`);
+          }
         }
         else {
           console.warn(`[Visual Novel] Invalid SPRITE tag ignored: ${v}`);
+          report.sprites.push({ requested: v, matched: null, exact: false });
+          report.mismatches.push(`Sprite: "${v}" not found — tag was ignored`);
           if (debugMode) appendDebug(`  -> Sprite not found: ${v}`, "error");
         }
       }
@@ -876,12 +897,23 @@
         if (!v) continue;
         if (v.toLowerCase() === "stop") {
           playMusic(null);
+          report.music.push({ requested: "stop", matched: "stop", exact: true });
           continue;
         }
         const valid = validateImage(v, "music");
-        if (valid) playMusic(valid);
-        else {
+        if (valid) {
+          playMusic(valid);
+          const cleanReq = cleanTagValue(v).toLowerCase();
+          const cleanMatch = stripExt(valid.split(/[/\\]/).pop()).toLowerCase();
+          const isExact = cleanMatch.includes(cleanReq) || cleanReq.includes(cleanMatch);
+          report.music.push({ requested: v, matched: valid, exact: isExact });
+          if (!isExact) {
+            report.mismatches.push(`Music: requested "${v}" but playing "${stripExt(valid.split(/[/\\]/).pop())}"`);
+          }
+        } else {
           console.warn(`[Visual Novel] Invalid MUSIC tag ignored: ${v}`);
+          report.music.push({ requested: v, matched: null, exact: false });
+          report.mismatches.push(`Music: "${v}" not found — tag was ignored`);
           if (debugMode) appendDebug(`  -> Music not found: ${v}`, "error");
         }
       }
@@ -895,10 +927,11 @@
       if (m.type === "fx") {
         if (!v) continue;
         triggerEffect(v);
+        report.effects.push({ requested: v, executed: true });
       }
     }
 
-    return { text: stripVisualTags(input), stats: { spriteUpdated }, missing };
+    return { text: stripVisualTags(input), stats: { spriteUpdated }, missing, report };
   }
 
   // ---------------------------
