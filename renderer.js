@@ -476,6 +476,13 @@ function buildSystemPrompt(sceneCharacters) {
     systemContent += `\n\n[STORY SUMMARY]\n${window.chatSummary.content}`;
   }
 
+  // --- RENDER FEEDBACK (Self-Correction) ---
+  // Check the last assistant message for any visual mismatches
+  const lastAssistant = window.messages.slice().reverse().find(m => m.role === 'assistant');
+  if (lastAssistant?.renderReport?.mismatches?.length) {
+     systemContent += `\n\n[RENDER FEEDBACK]\nYour last visual tags had issues:\n${lastAssistant.renderReport.mismatches.join('\n')}\n(Please adapt narration to the actual visuals)`;
+  }
+
   return systemContent.trim();
 }
 
@@ -555,7 +562,7 @@ async function initializeChat() {
       window.voice.speak(initialText, getSceneContext(initialText));
     }
 
-    window.messages.push({ role: 'assistant', content: initialText.trim() });
+    window.messages.push({ role: 'assistant', content: initialText.trim(), renderReport: null });
     turnCount = 0;
 
     renderChat();
@@ -643,7 +650,7 @@ async function streamChat(payload, sceneCharacters) {
     }
 
     // Execute visual tags first
-    const { stats, missing } = processVisualTags(fullResponse);
+    const { stats, missing, report } = processVisualTags(fullResponse);
     if (missing?.length) handleMissingVisuals(missing); // Async, don't await to keep UI responsive
 
     // If no sprites were explicitly updated (either no tags or invalid tags),
@@ -663,7 +670,7 @@ async function streamChat(payload, sceneCharacters) {
       window.voice.speak(fullResponse, sceneCharacters);
     }
 
-    return fullResponse.trim();
+    return { content: fullResponse.trim(), report };
   } finally {
     if (removeListener) removeListener();
     // Ensure chat stays pinned
@@ -693,9 +700,9 @@ async function handleSend() {
   const payload = buildPayload(sceneCharacters);
 
   try {
-    const rawResponse = await streamChat(payload, sceneCharacters);
+    const { content, report } = await streamChat(payload, sceneCharacters);
 
-    window.messages.push({ role: 'assistant', content: rawResponse });
+    window.messages.push({ role: 'assistant', content, renderReport: report });
     await saveCurrentChatState();
     
     // Re-render to ensure the new message gets its buttons (Delete, Branch, etc.)
@@ -797,7 +804,7 @@ async function regenerateResponse({ replace } = { replace: false }) {
     const sceneCharacters = getSceneContext(text);
 
     const payload = buildPayload(sceneCharacters);
-    const rawResponse = await streamChat(payload, sceneCharacters);
+    const { content: rawResponse, report } = await streamChat(payload, sceneCharacters);
 
     let newSwipes;
     let newSwipeId;
@@ -817,7 +824,8 @@ async function regenerateResponse({ replace } = { replace: false }) {
       role: 'assistant',
       content: rawResponse,
       swipes: newSwipes,
-      swipeId: newSwipeId
+      swipeId: newSwipeId,
+      renderReport: report
     });
     
     await saveCurrentChatState();
