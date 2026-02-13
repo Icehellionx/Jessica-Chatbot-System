@@ -448,6 +448,30 @@ async function generateStream(config, messages, onChunk, options = {}) {
   return fullText;
 }
 
+async function fetchInnerMonologue(config, characterName, messages) {
+  const systemPrompt = `You are a world-class author. Based on the provided conversation history, write a short, first-person inner monologue for the character "${characterName}".
+- The monologue should reveal their private thoughts, feelings, or intentions based on the recent events in the conversation.
+- Write ONLY the monologue text itself.
+- Do NOT include any surrounding text, narration, or quotation marks.
+- The tone should match the character's personality and the current situation.`;
+
+  // Use a slice of the most recent messages to keep the context focused and save tokens.
+  const recentMessages = messages.slice(-10);
+
+  const finalMessages = [
+    { role: 'system', content: systemPrompt },
+    ...recentMessages,
+  ];
+
+  try {
+    const monologue = await generateCompletion(config, finalMessages, { temperature: 0.75 });
+    return monologue;
+  } catch (e) {
+    console.error('Inner Monologue generation failed:', e);
+    return 'Failed to generate thoughts.';
+  }
+}
+
 /** Avoid exploding on circulars / big objects in error paths */
 function safeJsonStringify(x) {
   try {
@@ -463,5 +487,6 @@ module.exports = {
   generateCompletion,
   generateStream,
   generateEmbedding,
+  fetchInnerMonologue, // <-- Export the new function
   axios,
 };

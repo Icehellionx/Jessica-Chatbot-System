@@ -11,10 +11,12 @@ let currentMusic = null;      // The currently "active" Audio instance
 let musicVolume = 0.5;        // 0..1
 let isMuted = false;
 let voiceVolume = 1.0;        // 0..1 for TTS
+let sfxVolume = 0.7;          // 0..1 for Sound Effects
 let isDucked = false;         // Ducking state for TTS
 
 const LOOP_CROSSFADE_MS = 2000;
 const FADE_TICK_MS = 50;
+
 
 /* ----------------------------- UI CONTROLS ------------------------------ */
 
@@ -100,8 +102,26 @@ function setupVolumeControls() {
   voiceSlider.title = 'Voice Volume';
   voiceSlider.style.cssText = volumeSlider.style.cssText;
 
+  const sfxSlider = document.createElement('input');
+  sfxSlider.type = 'range';
+  sfxSlider.min = '0';
+  sfxSlider.max = '1';
+  sfxSlider.step = '0.05';
+  sfxSlider.value = String(sfxVolume);
+  sfxSlider.title = 'SFX Volume';
+  sfxSlider.style.cssText = volumeSlider.style.cssText;
+
+  const sfxBtn = document.createElement('button');
+  sfxBtn.type = 'button';
+  sfxBtn.textContent = '🎶';
+  sfxBtn.className = 'tool-btn';
+  sfxBtn.style.marginRight = '5px';
+  sfxBtn.title = 'SFX';
+
+
   // Assemble groups
   volumeContainer.appendChild(createGroup('Voice', voiceBtn, voiceSlider));
+  volumeContainer.appendChild(createGroup('SFX', sfxBtn, sfxSlider));
   volumeContainer.appendChild(createGroup('Music', muteBtn, volumeSlider));
 
   // If an undo button exists, insert before it for consistent layout
@@ -118,6 +138,11 @@ function setupVolumeControls() {
     // Update active audio immediately if possible
     if (window.voice) window.voice.setVolume(voiceVolume);
   });
+
+  sfxSlider.addEventListener('input', (e) => {
+    sfxVolume = clamp01(parseFloat(e.target.value));
+  });
+
 
   muteBtn.addEventListener('click', () => {
     setMuted(!isMuted);
@@ -211,6 +236,21 @@ function playMusic(filename) {
 function getCurrentMusicFilename() {
   if (!currentMusic || currentMusic.paused) return '';
   return getAudioFilename(currentMusic) || '';
+}
+
+/**
+ * Play a one-shot sound effect.
+ */
+function playSfx(filename) {
+  if (isStopCommand(filename)) return;
+
+  // We use a simplified path assumption for SFX
+  const audio = new Audio(`bot-resource://sfx/${filename}`);
+  audio.volume = sfxVolume;
+
+  audio.play().catch(e => {
+    console.error(`Failed to play SFX: ${filename}`, e);
+  });
 }
 
 /* ------------------------------ INTERNALS ------------------------------ */
@@ -630,3 +670,5 @@ class VoiceEngine {
 
 window.voice = new VoiceEngine();
 window.getCurrentMusicFilename = getCurrentMusicFilename;
+window.playSfx = playSfx; // <-- EXPORT THE NEW FUNCTION
+

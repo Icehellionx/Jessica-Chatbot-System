@@ -304,6 +304,9 @@ function filterRelevantAssets(files, recentText) {
 }
 
 function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, recentText) {
+  // Destructure with defaults
+  const { activeCharacters = [], inventory = [], sceneObjects = [] } = options;
+
   // Filter lists to prevent token explosion
   const allBackgrounds = listCategoryFiles({ botImagesPath, botFilesPath }, 'backgrounds');
   const backgrounds = filterRelevantAssets(allBackgrounds, recentText);
@@ -312,7 +315,7 @@ function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, r
 
   // --- Sprite Filtering Logic ---
   const allSprites = listCategoryFiles({ botImagesPath, botFilesPath }, 'sprites');
-  const activeChars = new Set((options.activeCharacters || []).map(c => String(c).toLowerCase()));
+  const activeChars = new Set(activeCharacters.map(c => String(c).toLowerCase()));
   
   const visibleSprites = [];
   const availableGroups = new Set();
@@ -355,6 +358,14 @@ function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, r
 
   if (splashList) visualPrompt += `\nSplash Art:\n${splashList}`;
   if (musicList) visualPrompt += `\nMusic:\n${musicList}`;
+
+  // Add Inventory and Scene Objects to the prompt
+  if (sceneObjects.length > 0) {
+    visualPrompt += `\n\n[SCENE_OBJECTS]\n- ${sceneObjects.join('\n- ')}`;
+  }
+  if (inventory.length > 0) {
+    visualPrompt += `\n\n[PLAYER_INVENTORY]\n- You are carrying: ${inventory.join(', ')}`;
+  }
 
   visualPrompt += `\n\nINSTRUCTIONS:
 1. Output visual tags ONLY at the start or end of the message.
@@ -505,7 +516,10 @@ function buildEnforcementRules({ stateInjection, loreInjection, advancedPromptCo
 2. Maintain distinct personalities.
 3. Ensure each character's voice remains consistent.
 4. Manage the stage. If a character leaves, use [HIDE: Name].
-5. Dialogue MUST be in script format (Name: "Speech").${stateInjection}${loreInjection}${advancedPromptContent ? `\n\n${advancedPromptContent}` : ''}`;
+5. To add a new object to the scene, use [ADD_OBJECT: "name"].
+6. If the user takes an object, you MUST use [TAKE: "name"].
+7. To drop an inventory item, use [DROP: "name"].
+8. Dialogue MUST be in script format (Name: "Speech").${stateInjection}${loreInjection}${advancedPromptContent ? `\n\n${advancedPromptContent}` : ''}`;
 }
 
 /**
@@ -904,6 +918,16 @@ module.exports = function registerIpcHandlers(paths) {
     return saveConfig(c);
   });
 
+  ipcMain.handle('toggle-dev-tools', (event, open) => {
+    if (open === undefined || open === null) {
+      event.sender.toggleDevTools();
+    } else if (open) {
+      event.sender.openDevTools({ mode: 'detach' });
+    } else {
+      event.sender.closeDevTools();
+    }
+  });
+
   ipcMain.handle('clear-voice-map', () => {
     try {
       if (fs.existsSync(voiceMapPath)) fs.unlinkSync(voiceMapPath);
@@ -1073,6 +1097,12 @@ module.exports = function registerIpcHandlers(paths) {
   ipcMain.handle('load-current-chat', () => readJsonSafe(currentChatPath, {}));
 
   /* ------------------------------ IPC: AI ------------------------------- */
+
+  ipcMain.handle('get-inner-monologue', async (_event, characterName, messages) => {
+    const config = loadConfig();
+    const cleanMessages = cleanMessagesForApi(messages);
+    return aiService.fetchInnerMonologue(config, characterName, cleanMessages);
+  });
 
   ipcMain.handle('test-provider', async () => aiService.testConnection(loadConfig()));
 

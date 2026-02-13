@@ -11,26 +11,23 @@
    ========================================================================== */
 
 /* ------------------------------ DOM HELPERS ------------------------------ */
-
-const $ = (id) => document.getElementById(id);
+import { useStore } from './src/store.js';
+import { $, parseMarkdown, normalizeText } from './src/utils.js';
+import { getMood, getSceneContext, buildPayload } from './src/prompt-engine.js';
 
 const userInput = $('user-input');
 const sendBtn = $('send-btn');
 const chatHistory = $('chat-history');
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text ?? '';
-  return div.innerHTML;
-}
+/* --------------------------- ERROR HANDLING ------------------------------ */
 
-function normalizeText(text) {
-  // Accent-insensitive matching for filenames
-  return String(text ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
+window.onerror = function(message, source, lineno, colno, error) {
+  console.error('[Global Error]', error);
+  alert(`An error occurred:\n${message}`);
+};
+window.onunhandledrejection = function(event) {
+  console.error('[Unhandled Rejection]', event.reason);
+};
 
 /* --------------------------- GLOBAL STATE -------------------------------- */
 
@@ -39,7 +36,6 @@ window.botInfo = { personality: '', scenario: '', initial: '', characters: {} };
 window.userPersona = { name: 'Jim', details: '' };
 window.chatSummary = { content: '' };
 window.imageManifest = {}; // { backgrounds, sprites, splash, music }
-const activeSprites = window.__activeSprites;
 
 let turnCount = 0;
 
@@ -58,28 +54,6 @@ window.refocusInput = () => {
   }, 50);
 };
 
-/* ------------------------------ MARKDOWN --------------------------------- */
-/**
- * Minimal markdown:
- * - escapes HTML
- * - supports ***bold+italic***, **bold**, *italic* or _italic_
- * - converts newlines to <br>
- *
- * Note: intentionally simple; no links, no images, no raw HTML.
- */
-function parseMarkdown(text) {
-  if (!text) return '';
-  let html = escapeHtml(text);
-
-  // Strong+em: ***text***
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  // Strong: **text**
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Em: *text* or _text_ (avoid matching inside words with simple boundaries)
-  html = html.replace(/(^|[\s(])(\*|_)(.+?)\2(?=[\s).,!?:;]|$)/g, '$1<em>$3</em>');
-
-  return html.replace(/\n/g, '<br>');
-}
 
 /* ------------------------------ UI MESSAGES ------------------------------ */
 
@@ -167,34 +141,6 @@ function appendSystemNotice(text) {
   appendMessage('system', text, undefined);
 }
 
-/* ------------------------------ MOOD HEURISTIC --------------------------- */
-
-const moodKeywords = {
-  Happy: ['happy', 'smile', 'laugh', 'joy', 'excited', 'glad', 'grin', 'chuckle', 'giggle', 'warmly'],
-  Sad: ['sad', 'cry', 'tear', 'sorrow', 'depressed', 'grief', 'sob', 'upset', 'distant', 'gloomy'],
-  Angry: ['angry', 'mad', 'rage', 'fury', 'hate', 'resent', 'annoyed', 'glare', 'tense', 'frown'],
-  Scared: ['scared', 'fear', 'afraid', 'terrified', 'horror', 'panic', 'shiver', 'shock', 'gasp'],
-  Flirty: ['flirty', 'coy', 'blush', 'love', 'cute', 'hot', 'kiss', 'wink', 'seductive'],
-  Anxious: ['anxious', 'nervous', 'worry', 'guarded', 'hesitant', 'shy', 'uneasy'],
-  Surprised: ['surprised', 'shocked', 'stunned', 'disbelief', 'wide-eyed'],
-};
-
-function getMood(text) {
-  const lower = String(text ?? '').toLowerCase();
-  let best = 'Default';
-  let bestHits = 0;
-
-  for (const [mood, words] of Object.entries(moodKeywords)) {
-    let hits = 0;
-    for (const w of words) if (lower.includes(w)) hits++;
-    if (hits > bestHits) {
-      bestHits = hits;
-      best = mood;
-    }
-  }
-
-  return best;
-}
 
 /* ------------------------------ ASSET GENERATION ------------------------- */
 
@@ -275,65 +221,204 @@ function showTitleScreenIfExists() {
   });
 }
 
+/* ------------------------------ STATE-DRIVEN UI (NEW) -------------------- */
+
+function updateThoughtsDropdown() {
+  const thoughtsCharSelect = document.getElementById('thoughts-char-select');
+  if (!thoughtsCharSelect) return;
+
+  const currentSelection = thoughtsCharSelect.value;
+  thoughtsCharSelect.innerHTML = '';
+  
+  // Get visible characters directly from the visuals manager, which is the source of truth
+  const visibleCharacters = window.getActiveSpriteNames ? window.getActiveSpriteNames() : [];
+
+  if (visibleCharacters.length === 0) {
+    const opt = new Option('No one is here', '');
+    opt.disabled = true;
+    thoughtsCharSelect.add(opt);
+  } else {
+    visibleCharacters.forEach(charName => {
+      const opt = new Option(charName.charAt(0).toUpperCase() + charName.slice(1), charName);
+      thoughtsCharSelect.add(opt);
+    });
+    // Restore previous selection if still visible
+    if (visibleCharacters.includes(currentSelection)) {
+      thoughtsCharSelect.value = currentSelection;
+    }
+  }
+}
+
+function setupStateSubscribers() {
+  // Vanilla Zustand subscribe passes (state, prevState)
+  useStore.subscribe((state, prevState) => {
+    
+    // 1. Background
+    if (state.currentBackground !== prevState.currentBackground) {
+      console.log('Background state changed to:', state.currentBackground);
+      if (state.currentBackground) window.changeBackground(state.currentBackground);
+    }
+
+    // 2. Characters (Deep compare check is expensive, so we rely on reference equality from immutable updates)
+    if (state.characters !== prevState.characters) {
+      console.log('Character state changed:', state.characters);
+      for (const charName in state.characters) {
+        const charState = state.characters[charName];
+        // Only update if this specific character changed (optimization)
+        if (charState !== prevState.characters[charName]) {
+            if (charState.isVisible) {
+              const spriteFile = window.findBestSprite(charName, charState.emotion);
+              if (spriteFile) window.updateSprite(spriteFile);
+            } else {
+              window.hideSprite(charName);
+            }
+        }
+      }
+      updateThoughtsDropdown();
+    }
+
+    // 3. Music
+    if (state.currentMusic !== prevState.currentMusic) {
+      console.log('Music state changed to:', state.currentMusic);
+      window.playMusic(state.currentMusic);
+    }
+
+    // 4. Splash
+    if (state.currentSplash !== prevState.currentSplash) {
+      if (state.currentSplash) window.showSplash(state.currentSplash);
+      else window.hideSplash();
+    }
+
+    // 5. Dialogue History
+    if (state.dialogueHistory !== prevState.dialogueHistory) {
+      renderChat();
+    }
+
+    // 6. Inventory
+    if (state.inventory !== prevState.inventory) {
+        const inventoryListEl = document.getElementById('inventory-list');
+        if (inventoryListEl) {
+            if (state.inventory.length === 0) {
+                inventoryListEl.textContent = 'Empty';
+            } else {
+                inventoryListEl.textContent = state.inventory.join(', ');
+            }
+        }
+    }
+  });
+}
+
+/* ------------------------------ VISUAL HANDLERS -------------------------- */
+// These handlers update the Store, which then triggers the UI subscribers.
+// This ensures the Store is the single source of truth.
+const visualHandlers = {
+  onBg: (bg) => useStore.getState().setBackground(bg),
+  onMusic: (music) => useStore.getState().setMusic(music),
+  onSplash: (splash) => useStore.getState().setSplash(splash),
+  onSprite: (filename) => {
+    const charName = window.getCharacterName(filename);
+    if (charName) {
+      const mood = filename.split(/[/\\]/).pop().split('.')[0].replace(new RegExp(`^${charName}[_-]`, 'i'), '');
+      useStore.getState().setCharacterVisibility(charName, true);
+      useStore.getState().setCharacterEmotion(charName, mood || 'default');
+    }
+  }
+};
+
 /* ------------------------------ CHAT STATE IO ---------------------------- */
 
 async function saveCurrentChatState() {
-  const bgSrc = $('vn-bg')?.src ?? '';
-  let bgFilename = bgSrc.includes('bot-resource://') ? bgSrc.split('bot-resource://')[1] : '';
-  bgFilename = decodeURIComponent(bgFilename);
+  console.log('Saving current state...');
+  console.log('[DEBUG] Active Sprites Map:', window.__activeSprites);
+  
+  // 1. Messages (Source of Truth: window.messages)
+  const messages = window.messages || [];
 
+  // 2. Background (Source of Truth: DOM)
+  // CHANGED: Read from Store
+  const { currentBackground, characters, currentMusic, currentSplash } = useStore.getState();
+  const background = currentBackground || '';
+  const splash = currentSplash || '';
+
+  // 3. Sprites (Source of Truth: visuals.js activeSprites map)
+  // CHANGED: Reconstruct from Store
   const spriteFilenames = [];
-  activeSprites.forEach((img) => {
-    if (img.src.includes('bot-resource://')) {
-      spriteFilenames.push(decodeURIComponent(img.src.split('bot-resource://')[1]));
-    }
-  });
-
-  const splashContainer = $('splash-container');
-  let splashFilename = '';
-  if (splashContainer?.classList.contains('active')) {
-    const img = splashContainer.querySelector('img');
-    if (img?.src?.includes('bot-resource://')) {
-      splashFilename = decodeURIComponent(img.src.split('bot-resource://')[1]);
+  for (const [name, charState] of Object.entries(characters)) {
+    if (charState.isVisible) {
+      const file = window.findBestSprite(name, charState.emotion);
+      if (file) spriteFilenames.push(file);
     }
   }
 
-  const musicFilename = getCurrentMusicFilename();
+  // 4. Music (Source of Truth: audio.js)
+  // CHANGED: Read from Store
+  const music = currentMusic || '';
 
   const state = {
-    messages: window.messages,
-    background: bgFilename,
+    messages,
+    background,
     sprites: spriteFilenames,
-    splash: splashFilename,
-    music: musicFilename,
+    splash,
+    music,
   };
 
+  console.log('[DEBUG] Saving Snapshot:', state);
   await window.api.saveCurrentChat(state);
 }
 
 async function restoreChatState(state) {
+  console.log('[DEBUG] Restoring Snapshot:', state);
+  // NEW: Instead of manually manipulating the DOM, we just set the state in the store.
+  // The subscribers we defined above will handle updating the UI automatically.
+  
+  const { setBackground, setCharacterEmotion, setCharacterVisibility, setMusic, setSplash } = useStore.getState();
+
+  // Restore messages (this part still needs some manual sync with the store)
   window.messages = Array.isArray(state?.messages) ? state.messages : [];
+  useStore.setState({ dialogueHistory: window.messages }); // Sync store
 
-  // Prefer your visuals helpers so any extra logic runs
+  let bgToLoad = null;
   if (state?.background) {
-    const validBg = validateImage(state.background, 'backgrounds');
-    if (validBg) changeBackground(validBg);
+    bgToLoad = validateImage(state.background, 'backgrounds');
+    console.log(`[DEBUG] Background '${state.background}' validated as:`, bgToLoad);
   }
+  
+  // Fallback if no background saved OR validation failed
+  if (!bgToLoad) {
+    console.log('[DEBUG] No valid background found in save, attempting fallback...');
+    const bgs = window.imageManifest?.backgrounds ? Object.keys(window.imageManifest.backgrounds) : [];
+    if (bgs.length > 0) bgToLoad = bgs[0];
+  }
+  
+  console.log('[DEBUG] Final Background to Load:', bgToLoad);
+  if (bgToLoad) setBackground(bgToLoad);
 
-  activeSprites.forEach((img) => img.remove());
-  activeSprites.clear();
-
+  // Set character state from saved sprites
+  const allChars = Object.keys(window.botInfo.characters || {});
+  allChars.forEach(char => setCharacterVisibility(char, false)); // Hide all first
+  
   if (Array.isArray(state?.sprites)) {
-    for (const filename of state.sprites) updateSprite(filename);
+    console.log('[DEBUG] Restoring Sprites List:', state.sprites);
+    for (const filename of state.sprites) {
+        const charName = getCharacterName(filename);
+        // Robust mood extraction: remove character name prefix (case-insensitive) from filename
+        const mood = filename.split('/').pop().split('.')[0].replace(new RegExp(`^${charName}[_-]`, 'i'), '');
+        if (charName) {
+            setCharacterVisibility(charName, true);
+            setCharacterEmotion(charName, mood || 'default');
+        }
+    }
   }
 
-  if (state?.splash) showSplash(state.splash);
-  else hideSplash();
+  if (state?.splash) setSplash(state.splash);
+  else setSplash(null);
 
-  if (state?.music) playMusic(state.music);
-  else playMusic(null);
+  if (state?.music) setMusic(state.music);
+  else setMusic(null);
 
+  // Force render to ensure UI is in sync
   renderChat();
+  updateThoughtsDropdown();
 
   // Prime voice engine with the last assistant message so the button works immediately
   if (window.voice && window.messages.length > 0) {
@@ -343,8 +428,9 @@ async function restoreChatState(state) {
     }
   }
 
-  console.log('Chat state restored.');
+  console.log('Chat state restored by setting store state.');
 }
+
 
 /* ------------------------------ RENDER CHAT ------------------------------ */
 
@@ -377,120 +463,17 @@ function renderChat() {
     }
   });
 
-  chatHistory.scrollTop = chatHistory.scrollHeight;
-}
-
-/* ------------------------------ SCENE CONTEXT ---------------------------- */
-
-function getSceneContext(userText) {
-  // 1) currently visible
-  const activeNames = new Set(activeSprites.keys());
-
-  // 2) add characters mentioned in user text
-  if (userText && window.botInfo?.characters) {
-    const lower = String(userText).toLowerCase();
-    for (const name of Object.keys(window.botInfo.characters)) {
-      if (lower.includes(name.toLowerCase())) activeNames.add(name.toLowerCase());
-    }
-  }
-
-  return Array.from(activeNames);
-}
-
-/* ------------------------------ PAYLOAD BUILD ---------------------------- */
-
-/**
- * Extract a short summary block from a character text (best-effort).
- * Keeps token usage down when listing “inactive” characters.
- */
-function extractCharacterSummary(charText) {
-  if (!charText) return '';
-  const match = String(charText).match(/###\s*SUMMARY:([\s\S]*?)(?=###|$)/i);
-  const raw = match ? match[1].trim() : String(charText).slice(0, 150).replace(/\n/g, ' ') + '...';
-  return raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-}
-
-function buildSystemPrompt(sceneCharacters) {
-  const base = [window.botInfo.personality, window.botInfo.scenario].filter(Boolean).join('\n\n');
-  let systemContent = base;
-
-  // Inject active character personalities
-  for (const nameLower of sceneCharacters) {
-    const realName = Object.keys(window.botInfo.characters).find(k => k.toLowerCase() === nameLower);
-    if (!realName) continue;
-
-    systemContent += `\n\n[Character: ${realName}]\n${window.botInfo.characters[realName]}`;
-
-    // If mentioned but not visible, hint the model
-    if (activeSprites.has(nameLower)) {
-      // Webbing: Tell AI what the character currently looks like (Mood)
-      const img = activeSprites.get(nameLower);
-      if (img && img.src) {
-        // Extract filename: "bot-resource://sprites/Jessica/happy.png" -> "happy"
-        try {
-          const filename = decodeURIComponent(img.src.split('bot-resource://')[1] || '');
-          const base = filename.split(/[/\\]/).pop().split('.')[0]; // "happy"
-          // Remove char name if present (e.g. "jessica_happy" -> "happy")
-          const mood = base.toLowerCase().replace(nameLower, '').replace(/^[_\-\s]+/, '') || 'Default';
-          systemContent += `\n(Visual State: ${realName} is currently showing expression: "${mood}")`;
-        } catch (e) {}
-      }
+  // Update the visual dialogue box with the latest message
+  const lastMsg = window.messages[window.messages.length - 1];
+  if (window.setDialogue) {
+    if (lastMsg) {
+      window.setDialogue(parseMarkdown(stripVisualTags(lastMsg.content)), false);
     } else {
-      systemContent += `\n(System Note: ${realName} is not currently visible. If they are entering the scene, you MUST output [SPRITE: ${realName}] at the start.)`;
+      window.setDialogue("", false);
     }
   }
 
-  // Inactive characters list (summaries only)
-  const allNames = Object.keys(window.botInfo.characters);
-  const inactive = allNames.filter(n => !sceneCharacters.includes(n.toLowerCase()));
-
-  if (inactive.length) {
-    systemContent += `\n\n[Other Available Characters]\n(Output [SPRITE: Name] to bring them into the scene)`;
-    for (const name of inactive) {
-      systemContent += `\n- ${name}: ${extractCharacterSummary(window.botInfo.characters[name])}`;
-    }
-  }
-
-  // Persona
-  systemContent += `\n\n[USER INFO]\nName: ${window.userPersona.name}\nDetails: ${window.userPersona.details}`;
-
-  // Replace placeholder
-  systemContent = systemContent.replace(/{{user}}/g, window.userPersona.name);
-
-  // --- SCENE AWARENESS (Webbing) ---
-  // Inject current background, music, and time so the AI knows the "Vibe"
-  const bgSrc = $('vn-bg')?.src || '';
-  let location = 'Unknown';
-  if (bgSrc.includes('bot-resource://')) {
-    const bgName = decodeURIComponent(bgSrc.split('bot-resource://')[1]);
-    location = bgName.split(/[/\\]/).pop().split('.')[0].replace(/[_-]/g, ' ');
-  }
-
-  const musicName = window.getCurrentMusicFilename ? window.getCurrentMusicFilename() : '';
-  const musicInfo = musicName ? `\nBackground Music: "${musicName.split(/[/\\]/).pop().split('.')[0].replace(/[_-]/g, ' ')}"` : '';
-
-  systemContent += `\n\n[CURRENT SCENE STATE]\nLocation: ${location}${musicInfo}`;
-
-  // Summary
-  if (window.chatSummary?.content) {
-    systemContent += `\n\n[STORY SUMMARY]\n${window.chatSummary.content}`;
-  }
-
-  // --- RENDER FEEDBACK (Self-Correction) ---
-  // Check the last assistant message for any visual mismatches
-  const lastAssistant = window.messages.slice().reverse().find(m => m.role === 'assistant');
-  if (lastAssistant?.renderReport?.mismatches?.length) {
-     systemContent += `\n\n[RENDER FEEDBACK]\nYour last visual tags had issues:\n${lastAssistant.renderReport.mismatches.join('\n')}\n(Please adapt narration to the actual visuals)`;
-  }
-
-  return systemContent.trim();
-}
-
-function buildPayload(sceneCharacters) {
-  const systemContent = buildSystemPrompt(sceneCharacters);
-  return systemContent
-    ? [{ role: 'system', content: systemContent }, ...window.messages]
-    : window.messages;
+  chatHistory.scrollTop = chatHistory.scrollHeight;
 }
 
 /* ------------------------------ INITIAL CHAT ----------------------------- */
@@ -508,9 +491,12 @@ async function initializeChat() {
     renderChat();
 
     // Reset visuals
-    activeSprites.forEach(img => img.remove());
-    activeSprites.clear();
+    if (window.__activeSprites) {
+        window.__activeSprites.forEach(img => img.remove());
+        window.__activeSprites.clear();
+    }
     hideSplash();
+    if (window.setDialogue) window.setDialogue(""); // Clear dialogue box
 
     let initialText =
       window.botInfo.initial ||
@@ -535,7 +521,16 @@ async function initializeChat() {
         const name = bg.split(/[/\\]/).pop().split('.')[0].toLowerCase();
         return name.length > 2 && norm.includes(name);
       });
-      if (bestBg) changeBackground(bestBg);
+      
+      if (bestBg) {
+        changeBackground(bestBg);
+        useStore.getState().setBackground(bestBg); // Sync store
+      } else if (bgs.length > 0) {
+        // Fallback: If no keyword match, just show the first background so it's not black
+        const defaultBg = bgs[0];
+        changeBackground(defaultBg);
+        useStore.getState().setBackground(defaultBg);
+      }
     }
 
     // Music heuristic if no explicit tag
@@ -551,12 +546,19 @@ async function initializeChat() {
 
       let bestTrack = matchTrack(normInit) || matchTrack(normScenario) || tracks.find(t => t.toLowerCase().includes('default'));
 
-      if (bestTrack) playMusic(bestTrack);
-      else playMusic(null);
+      if (bestTrack) {
+        playMusic(bestTrack);
+        useStore.getState().setMusic(bestTrack); // Sync store
+      } else {
+        playMusic(null);
+        useStore.getState().setMusic(null);
+      }
     }
 
-    const { missing } = processVisualTags(initialText);
+    const { missing } = processVisualTags(initialText, { store: useStore.getState(), handlers: visualHandlers });
     if (missing?.length) await handleMissingVisuals(missing);
+
+    updateThoughtsDropdown();
 
     if (window.voice) {
       window.voice.speak(initialText, getSceneContext(initialText));
@@ -623,7 +625,7 @@ function createAssistantStreamBubble() {
   return { msgDiv, contentDiv };
 }
 
-async function streamChat(payload, sceneCharacters) {
+async function streamChat(payload, options) {
   const { msgDiv, contentDiv } = createAssistantStreamBubble();
 
   let accumulated = '';
@@ -637,11 +639,15 @@ async function streamChat(payload, sceneCharacters) {
         received = true;
       }
       accumulated += chunk;
-      contentDiv.innerHTML = parseMarkdown(stripVisualTags(accumulated));
+      
+      const parsed = parseMarkdown(stripVisualTags(accumulated));
+      contentDiv.innerHTML = parsed;
+      if (window.setDialogue) window.setDialogue(parsed, true);
+
       chatHistory.scrollTop = chatHistory.scrollHeight;
     });
 
-    const fullResponse = await window.api.sendChat(payload, { activeCharacters: sceneCharacters });
+    const fullResponse = await window.api.sendChat(payload, options);
 
     // stop receiving chunks before we do final processing
     if (removeListener) {
@@ -650,12 +656,14 @@ async function streamChat(payload, sceneCharacters) {
     }
 
     // Execute visual tags first
-    const { stats, missing, report } = processVisualTags(fullResponse);
+    const { stats, missing, report } = processVisualTags(fullResponse, { store: useStore.getState(), handlers: visualHandlers });
     if (missing?.length) handleMissingVisuals(missing); // Async, don't await to keep UI responsive
+
 
     // If no sprites were explicitly updated (either no tags or invalid tags),
     // apply local mood heuristic to keep characters alive.
     if (!stats.spriteUpdated) {
+      const activeSprites = window.__activeSprites || new Map();
       const mood = getMood(fullResponse);
       for (const charName of activeSprites.keys()) {
         const sprite = findBestSprite(charName, mood);
@@ -663,11 +671,14 @@ async function streamChat(payload, sceneCharacters) {
       }
     }
 
+    updateThoughtsDropdown();
+
     // final render (tags stripped)
     contentDiv.innerHTML = parseMarkdown(stripVisualTags(fullResponse));
+    if (window.setDialogue) window.setDialogue(contentDiv.innerHTML, false);
 
     if (window.voice) {
-      window.voice.speak(fullResponse, sceneCharacters);
+      window.voice.speak(fullResponse, options.activeCharacters);
     }
 
     return { content: fullResponse.trim(), report };
@@ -696,11 +707,16 @@ async function handleSend() {
 
   // Determine active characters for this turn
   const sceneCharacters = getSceneContext(text);
+  const { inventory, sceneObjects } = useStore.getState();
 
   const payload = buildPayload(sceneCharacters);
 
   try {
-    const { content, report } = await streamChat(payload, sceneCharacters);
+    const { content, report } = await streamChat(payload, {
+      activeCharacters: sceneCharacters,
+      inventory: inventory,
+      sceneObjects: sceneObjects,
+    });
 
     window.messages.push({ role: 'assistant', content, renderReport: report });
     await saveCurrentChatState();
@@ -749,7 +765,7 @@ async function swapMessageVersion(msgIndex, swipeIndex) {
   renderChat();
   
   // Process visuals for the swapped message (so background/sprites update to match)
-  const { missing } = processVisualTags(msg.content);
+  const { missing } = processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
   if (missing?.length) handleMissingVisuals(missing);
   
   await saveCurrentChatState();
@@ -774,7 +790,7 @@ async function deleteSwipe(msgIndex) {
   renderChat();
   
   // Update visuals for the new current swipe
-  const { missing } = processVisualTags(msg.content);
+  const { missing } = processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
   if (missing?.length) handleMissingVisuals(missing);
 
   await saveCurrentChatState();
@@ -804,7 +820,12 @@ async function regenerateResponse({ replace } = { replace: false }) {
     const sceneCharacters = getSceneContext(text);
 
     const payload = buildPayload(sceneCharacters);
-    const { content: rawResponse, report } = await streamChat(payload, sceneCharacters);
+    const { inventory, sceneObjects } = useStore.getState();
+    const { content: rawResponse, report } = await streamChat(payload, { 
+      activeCharacters: sceneCharacters,
+      inventory,
+      sceneObjects,
+    });
 
     let newSwipes;
     let newSwipeId;
@@ -848,46 +869,13 @@ userInput.addEventListener('keydown', (e) => {
   }
 });
 
-/* ------------------------------ RESIZER ---------------------------------- */
-
-const resizer = $('resizer');
-const vnPanel = $('vn-panel');
-
-let isResizing = false;
-let rafId = null;
-
-resizer.addEventListener('mousedown', (e) => {
-  isResizing = true;
-  document.body.style.cursor = 'col-resize';
-  e.preventDefault();
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-  if (rafId) return;
-
-  rafId = requestAnimationFrame(() => {
-    const containerWidth = document.body.offsetWidth;
-    const pct = (e.clientX / containerWidth) * 100;
-
-    if (pct > 10 && pct < 90) {
-      vnPanel.style.width = `${pct}%`;
-    }
-
-    rafId = null;
-  });
-});
-
-document.addEventListener('mouseup', () => {
-  isResizing = false;
-  document.body.style.cursor = 'default';
-});
-
 /* ------------------------------ INIT ------------------------------------- */
 
 async function init() {
   setupVisuals();
+  setupStateSubscribers(); // <-- Add this line
   setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse, swapMessageVersion });
+  if (window.setupSettingsUI) window.setupSettingsUI({ initializeChat });
 
   setupVolumeControls();
 
@@ -915,15 +903,18 @@ async function init() {
   await showTitleScreenIfExists();
 
   if (!hasKeys) {
-    $('setup-modal')?.classList.remove('hidden');
+    if (window.openUnifiedSettings) window.openUnifiedSettings('system');
     return;
   }
 
   // Restore previous session if present
   const saved = await window.api.loadCurrentChat();
+  console.log('[DEBUG] Loaded Data from Disk:', saved);
+
   if (saved?.messages?.length) {
     await restoreChatState(saved);
   } else {
+    console.log('[DEBUG] No valid save found, initializing fresh chat.');
     await initializeChat();
   }
 }

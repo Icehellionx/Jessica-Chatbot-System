@@ -4,412 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Jessica</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' bot-resource: data:; img-src 'self' bot-resource: data:; media-src 'self' bot-resource: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 
-  <style>
-    :root{
-      --bg: #222;
-      --panel: #333;
-      --panel-2: #2a2a2a;
-      --panel-3: #252525;
-      --border: #444;
-      --border-2:#555;
-
-      --text: #eee;
-      --text-dim:#ccc;
-      --text-muted:#888;
-
-      --accent:#0078d4;
-      --accent-hover:#106ebe;
-      --danger:#d13438;
-
-      --radius-sm: 4px;
-      --radius-md: 8px;
-      --radius-pill: 24px;
-
-      --pad-1: 10px;
-      --pad-2: 20px;
-
-      --shadow: 0 10px 25px rgba(0,0,0,0.5);
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "zustand": "./src/vendor/zustand.js"
     }
-
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-
-    body {
-      margin: 0;
-      overflow: hidden;
-      display: flex;
-      height: 100vh;
-      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    /* --- Layout --- */
-    #vn-panel {
-      position: relative;
-      width: 40%;
-      height: 100%;
-      background: #000;
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-
-    #resizer {
-      width: 5px;
-      background: #444;
-      cursor: col-resize;
-      z-index: 100;
-      transition: background .2s;
-    }
-    #resizer:hover { background: var(--accent); }
-
-    #main-body {
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      background: var(--panel);
-      position: relative;
-      min-width: 320px;
-    }
-
-    #chat-history {
-      flex-grow: 1;
-      overflow-y: auto;
-      padding: var(--pad-2);
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
-    }
-
-    #input-area {
-      padding: var(--pad-2);
-      background: var(--panel-2);
-      display: flex;
-      gap: 10px;
-      border-top: 1px solid var(--border);
-    }
-
-    #user-input {
-      flex-grow: 1;
-      padding: 12px;
-      border-radius: var(--radius-pill);
-      border: 1px solid var(--border-2);
-      background: #444;
-      color: white;
-      resize: none;
-      height: 50px;
-      font-family: inherit;
-    }
-    #user-input:focus {
-      outline: 2px solid var(--accent);
-      border-color: transparent;
-    }
-
-    #send-btn {
-      padding: 0 25px;
-      background: var(--accent);
-      color: white;
-      border: none;
-      border-radius: var(--radius-pill);
-      cursor: pointer;
-      font-weight: 700;
-      transition: background .2s;
-    }
-    #send-btn:hover { background: var(--accent-hover); }
-
-    /* --- Messages --- */
-    .message{
-      padding: 12px 18px;
-      border-radius: var(--radius-md);
-      max-width: 80%;
-      line-height: 1.5;
-      position: relative;
-      word-wrap: break-word;
-      white-space: pre-wrap; /* helps preserve newlines */
-    }
-    .message.user{
-      align-self: flex-end;
-      background: #005a9e;
-      color: #fff;
-      border-bottom-right-radius: 2px;
-    }
-    .message.assistant{
-      align-self: flex-start;
-      background: #3b3b3b;
-      color: #f0f0f0;
-      border-bottom-left-radius: 2px;
-    }
-    .message.system{
-      align-self: center;
-      background: transparent;
-      font-size: 0.85em;
-      color: var(--text-muted);
-      font-style: italic;
-      padding: 5px;
-    }
-
-    .msg-delete-btn{
-      position: absolute;
-      top: -8px;
-      right: -8px;
-      background: var(--danger);
-      color: #fff;
-      border: none;
-      border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      cursor: pointer;
-      display: none;
-      font-size: 14px;
-      justify-content: center;
-      align-items: center;
-      line-height: 1;
-    }
-    .message:hover .msg-delete-btn{ display: flex; }
-
-    /* --- Message Navigation (Branching) --- */
-    .msg-nav {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.75em; color: var(--text-muted);
-      margin-top: 6px; user-select: none;
-    }
-    .msg-nav-btn {
-      background: transparent; border: 1px solid var(--border-2); color: var(--text-dim);
-      border-radius: 4px; cursor: pointer; padding: 2px 8px; font-size: 1em;
-    }
-    .msg-nav-btn:hover { background: var(--panel-3); color: #fff; }
-    .msg-nav-btn:disabled { opacity: 0.3; cursor: default; border-color: transparent; }
-
-    /* --- Message Actions --- */
-    .msg-action-btn {
-      background: none; border: none; color: #888; cursor: pointer;
-      font-size: 16px; margin-left: 5px; padding: 0 5px;
-    }
-    .msg-action-btn:hover { color: var(--accent); }
-
-    /* --- Toolbar --- */
-    #toolbar{
-      padding: var(--pad-1);
-      background: var(--panel-3);
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      border-bottom: 1px solid var(--border);
-      align-items: flex-end;
-      flex-wrap: wrap;
-      user-select: none;
-    }
-
-    .toolbar-group {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .toolbar-label {
-      color: #ccc;
-      font-size: 10px;
-      font-family: sans-serif;
-      margin-bottom: 2px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      line-height: 1;
-    }
-
-    .tool-btn{
-      background: #3a3a3a;
-      color: #ddd;
-      border: 1px solid #555;
-      padding: 6px 12px;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      font-size: .9em;
-      transition: background .2s, border-color .2s, transform .06s;
-    }
-    .tool-btn:hover { background: #4a4a4a; border-color: #777; }
-    .tool-btn:active { transform: translateY(1px); }
-
-    .tool-btn.primary { background: var(--accent); border: none; color: #fff; }
-    .tool-btn.primary:hover { background: var(--accent-hover); }
-    .tool-btn.danger { background: var(--danger); border: none; color: #fff; }
-
-    /* --- Modals --- */
-    .modal{
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.7);
-      z-index: 10000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      backdrop-filter: blur(2px);
-      padding: 16px;
-    }
-    .modal.hidden{ display: none; }
-
-    .modal-content{
-      background: #2d2d2d;
-      padding: 25px;
-      border-radius: var(--radius-md);
-      width: 450px;
-      max-width: 100%;
-      max-height: 90vh;
-      overflow-y: auto;
-      position: relative;
-      box-shadow: var(--shadow);
-      border: 1px solid var(--border);
-    }
-
-    .modal-content h2{
-      margin: 0 0 12px;
-      color: #fff;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 10px;
-    }
-
-    .form-group{ margin-bottom: 15px; }
-    .form-group label{
-      display: block;
-      margin-bottom: 5px;
-      color: var(--text-dim);
-      font-size: .9em;
-    }
-
-    .form-group input,
-    .form-group select,
-    .form-group textarea{
-      width: 100%;
-      padding: 10px;
-      background: #1f1f1f;
-      border: 1px solid var(--border);
-      color: #fff;
-      border-radius: var(--radius-sm);
-    }
-
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus{
-      outline: none;
-      border-color: var(--accent);
-    }
-
-    .modal-footer{
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      margin-top: 20px;
-    }
-
-    .close-btn{
-      position: absolute;
-      top: 15px;
-      right: 15px;
-      background: none;
-      border: none;
-      color: #aaa;
-      font-size: 24px;
-      cursor: pointer;
-      line-height: 1;
-    }
-    .close-btn:hover{ color: #fff; }
-
-    .divider{
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 20px 0;
-    }
-
-    /* --- VN specifics --- */
-    #vn-bg { width: 100%; height: 100%; object-fit: cover; }
-
-    .key-item{
-      background: #222;
-      padding: 10px;
-      margin-bottom: 8px;
-      border-radius: var(--radius-sm);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border: 1px solid #333;
-    }
-
-    /* typing dots */
-    .typing-dots span{
-      display:inline-block;
-      width:6px; height:6px;
-      background:#ccc;
-      border-radius:50%;
-      margin:0 2px;
-      animation: typing 1.4s infinite ease-in-out both;
-    }
-    .typing-dots span:nth-child(1){ animation-delay:-0.32s; }
-    .typing-dots span:nth-child(2){ animation-delay:-0.16s; }
-    @keyframes typing {
-      0%,80%,100%{ transform:scale(0); }
-      40%{ transform:scale(1); }
-    }
-
-    /* --- Scrollbars --- */
-    ::-webkit-scrollbar{ width:10px; height:10px; }
-    ::-webkit-scrollbar-track{ background:#222; }
-    ::-webkit-scrollbar-thumb{ background:#444; border-radius:5px; border:2px solid #222; }
-    ::-webkit-scrollbar-thumb:hover{ background:#555; }
-
-    /* --- Responsive: stack on narrow screens --- */
-    @media (max-width: 800px){
-      body{ flex-direction: column; }
-      #vn-panel{ width:100% !important; height:40vh; }
-      #resizer{ display:none; }
-      #main-body{ width:100%; height:60vh; }
-    }
-
-    /* --- Tree View --- */
-    .tree-level {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-      position: relative;
-      justify-content: center;
-    }
-    .tree-node {
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 8px;
-      padding: 10px;
-      width: 200px;
-      font-size: 0.8em;
-      cursor: pointer;
-      position: relative;
-      transition: all 0.2s;
-      opacity: 0.6;
-    }
-    .tree-node:hover { border-color: var(--accent); opacity: 0.8; }
-    .tree-node.active {
-      border-color: var(--accent);
-      background: #004578;
-      opacity: 1;
-      box-shadow: 0 0 10px rgba(0,120,212,0.3);
-    }
-    .tree-node.user { border-top: 3px solid #005a9e; }
-    .tree-node.assistant { border-top: 3px solid #3b3b3b; }
-    .tree-connector {
-      position: absolute;
-      top: -20px;
-      bottom: -20px;
-      width: 2px;
-      background: #555;
-      left: 50%;
-      z-index: -1;
-    }
-
-    /* --- Theater Mode (Hide UI) --- */
-    body.ui-hidden #main-body { display: none !important; }
-    body.ui-hidden #resizer { display: none !important; }
-    body.ui-hidden #vn-panel { width: 100% !important; cursor: pointer; }
-    /* Show a hint when hidden */
-    body.ui-hidden #vn-panel::after { content: "Click to restore UI"; position: absolute; bottom: 10px; right: 10px; color: rgba(255,255,255,0.5); font-size: 12px; pointer-events: none; }
-  </style>
+  }
+  </script>
 </head>
 
 <body>
@@ -426,16 +30,25 @@
         <span class="toolbar-label">Theater</span>
         <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
       </div>
+      <button id="toggle-history-btn" class="tool-btn" type="button" title="Show/Hide Chat History">📜 History</button>
       <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
       <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
       <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
       <button id="tree-btn" class="tool-btn" type="button" title="Branch Tree">🌳 Tree</button>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Thoughts</span>
+        <div style="display:flex; align-items:center;">
+          <select id="thoughts-char-select" class="tool-btn" style="padding-right: 30px;"></select>
+          <button id="get-thoughts-btn" class="tool-btn" type="button" title="Get Character Thoughts">🧠</button>
+        </div>
+      </div>
       <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️ Options</button>
     </div>
 
-    <div id="chat-history" aria-live="polite" aria-label="Chat messages"></div>
+    <!-- Spacer to push input area down -->
+    <div style="flex:1;"></div>
 
-    <div id="input-area">
+    <div id="input-area" style="z-index: 100;">
       <textarea
         id="user-input"
         placeholder="Type your message... (Shift+Enter for new line)"
@@ -443,6 +56,14 @@
       ></textarea>
       <button id="send-btn" type="button">Send</button>
     </div>
+  </div>
+
+  <div id="history-overlay" class="hidden" style="display:none; z-index: 200;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #555; padding-bottom:5px;">
+          <h3 style="margin:0; color:#fff;">Chat History</h3>
+          <button id="close-history-btn" class="close-btn" style="position:static; pointer-events:auto;">×</button>
+      </div>
+      <div id="chat-history" aria-live="polite" aria-label="Chat messages"></div>
   </div>
 
   <!-- Setup Modal -->
@@ -561,6 +182,10 @@
         <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:10px;">
           <input type="checkbox" id="debug-toggle" />
           <span>Enable Visual Debug Overlay</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:10px;">
+          <input type="checkbox" id="devtools-toggle" />
+          <span>Enable Developer Tools</span>
         </label>
       </div>
 
@@ -704,10 +329,20 @@
     </div>
   </div>
 
+  <!-- Generic Info Modal (for Inner Monologue) -->
+  <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <div class="modal-content" style="width:500px;">
+      <button id="close-info-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <h2 id="info-title">Inner Monologue</h2>
+      <p id="info-text" style="white-space: pre-wrap; line-height: 1.6; color: #ddd; max-height: 60vh; overflow-y: auto;"></p>
+    </div>
+  </div>
+
   <!-- Scripts (defer preserves order while not blocking HTML parsing) -->
   <script src="audio.js" defer></script>
   <script src="visuals.js" defer></script>
   <script src="ui.js" defer></script>
-  <script src="renderer.js" defer></script>
+  <script src="settings-ui.js" defer></script>
+  <script type="module" src="renderer.js" defer></script>
 </body>
 </html>

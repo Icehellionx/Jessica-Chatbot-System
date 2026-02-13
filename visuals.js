@@ -17,6 +17,8 @@
    hideSprite(nameOrFilename)
    showSplash(filename)
    hideSplash()
+   showThoughtBubble(charName, text)
+   setDialogue(htmlContent)
    stripVisualTags(text)
    processVisualTags(text)
    setVisualDebugMode(enabled)
@@ -81,14 +83,6 @@
 
   const $ = (id) => document.getElementById(id);
 
-  const ensureStyleOnce = (id, cssText) => {
-    if (document.getElementById(id)) return;
-    const style = document.createElement("style");
-    style.id = id;
-    style.textContent = cssText;
-    document.head.appendChild(style);
-  };
-
   const normSlashes = (s) => String(s || "").replace(/\\/g, "/");
 
   const stripExt = (lowerPath) => {
@@ -146,188 +140,7 @@
   // ---------------------------
 
   function setupVisuals() {
-    ensureStyleOnce(
-      "vn-visuals-style-v4", // Changed ID to force CSS update
-      `
-      /* Stage */
-      #vn-panel {
-        aspect-ratio: 16 / 9 !important;
-        height: auto !important;
-        align-self: center !important;
-        flex: none !important;
-        max-height: none !important;
-      }
-
-      #vn-bg {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        position: absolute;
-        top: 0; left: 0;
-        z-index: 0;
-      }
-
-      .bg-overlay {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        position: absolute;
-        top: 0; left: 0;
-        z-index: 1;
-        transition: opacity 1s ease-in-out;
-      }
-
-      /* Sprites */
-      #sprite-container {
-        position: absolute;
-        bottom: 0; left: 0;
-        width: 100%;
-        height: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: flex-end;
-        pointer-events: none;
-        overflow: visible;
-        z-index: 10;
-      }
-
-      .character-sprite {
-        height: 100%;
-        max-width: 60%;
-        width: auto;
-        object-fit: contain;
-        object-position: bottom;
-
-        transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out;
-        will-change: transform, opacity;
-        transform-origin: bottom center;
-
-        margin: 0 -2%;
-        transform: translateY(20px);
-        opacity: 0;
-
-        filter: drop-shadow(0 0 15px rgba(0,0,0,0.8));
-      }
-
-      .character-sprite.active {
-        transform: translateY(0);
-        opacity: 1;
-      }
-
-      /* Reroll icon in chat */
-      .msg-reroll-btn {
-        background: none;
-        border: none;
-        color: #888;
-        cursor: pointer;
-        font-size: 18px;
-        margin-left: 10px;
-        padding: 0 5px;
-        float: right;
-      }
-      .msg-reroll-btn:hover { color: #0078d4; }
-
-      /* Splash */
-      #splash-container {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 20;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 1s ease-in-out;
-      }
-      #splash-container.active {
-        opacity: 1;
-        pointer-events: auto;
-      }
-      .splash-image {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      /* Loading overlay */
-      #loading-overlay {
-        position: fixed;
-        top: 0; left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        z-index: 9999;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        color: white;
-        font-size: 24px;
-        font-family: sans-serif;
-        opacity: 0;
-        pointer-events: none;
-        user-select: none;
-        -webkit-user-select: none;
-        transition: opacity 0.3s ease;
-      }
-      #loading-overlay * { pointer-events: none; }
-      #loading-overlay.active { opacity: 1; }
-
-      /* Keep modals above overlays */
-      #setup-modal, #persona-modal, #options-modal, #summary-modal, #load-modal, #tree-modal {
-        z-index: 10001;
-      }
-      #voice-modal, #confirm-modal, #lorebook-modal {
-        z-index: 10002;
-      }
-
-      /* Debug Overlay */
-      #debug-overlay {
-        position: absolute;
-        top: 10px; right: 10px;
-        width: 350px; max-height: 80%;
-        overflow-y: auto;
-        background: rgba(0, 0, 0, 0.85);
-        color: #0f0;
-        font-family: monospace; font-size: 11px;
-        padding: 10px; border-radius: 4px;
-        border: 1px solid #555;
-        z-index: 9999; pointer-events: auto;
-        display: none; white-space: pre-wrap;
-      }
-      #debug-overlay.active { display: block; }
-      .debug-entry { margin-bottom: 4px; border-bottom: 1px solid #333; padding-bottom: 2px; }
-      .debug-error { color: #f55; }
-      .debug-success { color: #5f5; }
-      .debug-warn { color: #fa0; }
-
-      /* FX Animations */
-      @keyframes fx-shake {
-        0% { transform: translate(1px, 1px) rotate(0deg); }
-        10% { transform: translate(-1px, -2px) rotate(-1deg); }
-        20% { transform: translate(-3px, 0px) rotate(1deg); }
-        30% { transform: translate(3px, 2px) rotate(0deg); }
-        40% { transform: translate(1px, -1px) rotate(1deg); }
-        50% { transform: translate(-1px, 2px) rotate(-1deg); }
-        60% { transform: translate(-3px, 1px) rotate(0deg); }
-        70% { transform: translate(3px, 1px) rotate(-1deg); }
-        80% { transform: translate(-1px, -1px) rotate(1deg); }
-        90% { transform: translate(1px, 2px) rotate(0deg); }
-        100% { transform: translate(1px, -2px) rotate(-1deg); }
-      }
-      .fx-shake { animation: fx-shake 0.5s; }
-
-      @keyframes fx-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
-      .fx-flash-overlay { position: absolute; inset: 0; background: white; z-index: 50; pointer-events: none; animation: fx-flash 0.5s forwards; }
-
-      /* Speaking Animation */
-      .character-sprite.speaking {
-        filter: brightness(1.1) drop-shadow(0 0 5px rgba(255,255,255,0.3));
-        transform: scale(1.05) !important;
-        transition: transform 0.1s ease-out, filter 0.1s ease-out;
-        z-index: 50;
-      }
-
-      `
-    );
+    // CSS is now loaded via styles.css
   }
 
   // ---------------------------
@@ -429,34 +242,45 @@
   // Character + Sprite selection
   // ---------------------------
 
-  function getCharacterName(filename) {
+    function getCharacterName(filename) {
     const clean = normSlashes(filename);
     const parts = clean.split("/").filter(Boolean);
+    let charId = null;
 
     // Handle standard paths: "characters/..." or "sprites/..."
     if (parts[0] === "characters" || parts[0] === "sprites") {
       // sprites/Jessica/happy.png -> jessica
       if (parts.length >= 3) {
-        return String(parts[1]).toLowerCase();
+        charId = String(parts[1]).toLowerCase();
       }
       // sprites/Jessica.png -> jessica
       // sprites/jessica_happy.png -> jessica
-      if (parts.length === 2) {
+      else if (parts.length === 2) {
         const base = parts[1];
-        return base.split(/[_\-\.]/)[0].toLowerCase();
+        charId = base.split(/[_\-\.]/)[0].toLowerCase();
       }
     }
 
     // "Jessica/happy.png"
-    if (parts.length === 2) return String(parts[0]).toLowerCase();
-
-    // heuristic: "jessica_happy.png" -> "jessica"
-    const base = parts[parts.length - 1] || "";
-    if (/\.(png|jpg|jpeg|webp|gif)$/i.test(base)) {
-      return base.split(/[_\-\.]/)[0].toLowerCase();
+    else if (parts.length === 2) {
+      charId = String(parts[0]).toLowerCase();
     }
 
-    return String(base).toLowerCase();
+    // heuristic: "jessica_happy.png" -> "jessica"
+    else {
+      const base = parts[parts.length - 1] || "";
+      if (/\.(png|jpg|jpeg|webp|gif)$/i.test(base)) {
+        charId = base.split(/[_\-\.]/)[0].toLowerCase();
+      }
+    }
+    
+    if (!charId) {
+        const base = parts[parts.length - 1] || "";
+        charId = base.toLowerCase();
+    }
+
+    console.log(`getCharacterName: filename=${filename}, charId=${charId}`);
+    return charId;
   }
 
   function findBestSprite(characterName, mood) {
@@ -525,6 +349,7 @@
   // ---------------------------
 
   function changeBackground(filename) {
+    console.log('[DEBUG] changeBackground called with:', filename);
     hideSplash();
     const bg = $("vn-bg");
     if (!bg) return;
@@ -619,6 +444,7 @@
   }
 
   function updateSprite(filename) {
+    console.log('[DEBUG] updateSprite called with:', filename);
     hideSplash();
     const container = setupSpriteContainer();
     if (!container) return;
@@ -627,6 +453,7 @@
 
     const valid = filename; // assumes validateImage already used before calling
     const charId = getCharacterName(valid);
+    console.log(`updateSprite: charId=${charId}`);
     let img = activeSprites.get(charId);
 
     if (!img) {
@@ -717,6 +544,94 @@
     }
   }
 
+  function showThoughtBubble(charName, text) {
+    // 1. Remove existing bubbles
+    const existing = document.querySelectorAll('.thought-bubble');
+    existing.forEach(el => el.remove());
+
+    if (!text) return;
+
+    // 2. Find the sprite
+    const charId = String(charName).toLowerCase();
+    let spriteImg = activeSprites.get(charId);
+    
+    // Fallback fuzzy search if direct key fails
+    if (!spriteImg) {
+        for (const [key, img] of activeSprites.entries()) {
+            if (key.includes(charId) || charId.includes(key)) {
+                spriteImg = img;
+                break;
+            }
+        }
+    }
+
+    if (!spriteImg) {
+        console.warn(`[Visuals] Could not find sprite for thought bubble: ${charName}`);
+        return;
+    }
+
+    // 3. Create Bubble
+    const bubble = document.createElement('div');
+    bubble.className = 'thought-bubble';
+    bubble.textContent = text;
+
+    const panel = $('vn-panel');
+    if (!panel) return;
+    panel.appendChild(bubble);
+
+    // 4. Position it relative to the sprite
+    // We use the sprite's position on screen to place the bubble near their "head"
+    const spriteRect = spriteImg.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+
+    // Calculate relative position (approximate head height at 15% from top of sprite)
+    let left = (spriteRect.left - panelRect.left) + (spriteRect.width * 0.8); 
+    let top = (spriteRect.top - panelRect.top) + (spriteRect.height * 0.15);
+
+    bubble.style.left = `${left}px`;
+    bubble.style.top = `${top}px`;
+
+    // 5. Animate & Auto-dismiss
+    requestAnimationFrame(() => bubble.classList.add('active'));
+    
+    // Dismiss on click-away (clicking outside the bubble)
+    const dismiss = (e) => {
+        if (bubble.contains(e.target)) return; // Allow interaction inside bubble (e.g. text select)
+
+        bubble.classList.remove('active');
+        setTimeout(() => bubble.remove(), 500);
+        document.removeEventListener('click', dismiss);
+    };
+
+    // Delay adding listener to prevent immediate dismissal from the triggering click
+    setTimeout(() => {
+        document.addEventListener('click', dismiss);
+    }, 100);
+  }
+
+  function setDialogue(htmlContent, isTyping = false) {
+    let box = $("vn-dialogue-box");
+    if (!box) {
+      const panel = $("vn-panel");
+      if (!panel) return;
+      box = document.createElement("div");
+      box.id = "vn-dialogue-box";
+      panel.appendChild(box);
+    }
+
+    if (!htmlContent) {
+      box.classList.remove("active");
+      box.classList.remove("typing");
+    } else {
+      box.innerHTML = htmlContent;
+      box.classList.add("active");
+      if (isTyping) box.classList.add("typing");
+      else box.classList.remove("typing");
+      
+      box.scrollTop = box.scrollHeight;
+    }
+  }
+
   // ---------------------------
   // FX
   // ---------------------------
@@ -753,148 +668,136 @@
     music: /\[MUSIC:\s*([^\]]+)\]/gi,
     hide: /\[HIDE:\s*([^\]]+)\]/gi,
     fx: /\[FX:\s*([^\]]+)\]/gi,
+    sfx: /\[SFX:\s*([^\]]+)\]/gi,
+    camera: /\[CAMERA:\s*([^,]+),\s*([^\]]+)\]/gi,
+    // Inventory Tags
+    take: /\[TAKE:\s*([^\]]+)\]/gi,
+    drop: /\[DROP:\s*([^\]]+)\]/gi,
+    add_object: /\[ADD_OBJECT:\s*([^\]]+)\]/gi,
   };
 
   function stripVisualTags(text) {
     if (!text) return "";
     let out = String(text);
 
-    // Use fresh regexes
-    out = out
-      .replace(new RegExp(TAG_PATTERNS.bg.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.sprite.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.splash.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.music.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.hide.source, "gi"), "")
-      .replace(new RegExp(TAG_PATTERNS.fx.source, "gi"), "");
+    // Use fresh regexes, now that TAG_PATTERNS is more complex
+    out = Object.values(TAG_PATTERNS).reduce(
+        (acc, regex) => acc.replace(new RegExp(regex.source, "gi"), ""),
+        out
+    );
 
     return out.replace(/\n{3,}/g, "\n\n").trim();
   }
 
-  function processVisualTags(text) {
+  function processVisualTags(text, options = {}) {
     const input = String(text || "");
+    const { store, handlers } = options;
     const matches = [];
     const missing = [];
     let spriteUpdated = false;
 
     const collect = (type) => {
+      if (type === 'camera') {
+        const re = new RegExp(TAG_PATTERNS.camera.source, "gi");
+        for (const m of input.matchAll(re)) {
+          matches.push({ type, value: (m[1] || "").trim(), target: (m[2] || "").trim(), index: m.index ?? 0 });
+        }
+        return;
+      }
       const re = new RegExp(TAG_PATTERNS[type].source, "gi");
       for (const m of input.matchAll(re)) {
         matches.push({ type, value: (m[1] || "").trim(), index: m.index ?? 0 });
       }
     };
 
-    collect("bg");
-    collect("sprite");
-    collect("splash");
-    collect("music");
-    collect("hide");
-    collect("fx");
+    Object.keys(TAG_PATTERNS).forEach(collect);
 
     matches.sort((a, b) => a.index - b.index);
-
-    // If the message does NOT include a splash tag, auto-hide splash
+    activeSprites.forEach(img => img.classList.remove('camera-zoom-in'));
     if (!matches.some((m) => m.type === "splash")) hideSplash();
 
     for (const m of matches) {
       let v = m.value;
-
       if (debugMode) appendDebug(`Processing tag [${m.type}]: "${v}"`);
-
-      // Fix for LLM hallucinating descriptions inside tags (e.g. [SPRITE: "Name" looks happy])
-      // If we find a quoted string at the start, use that and ignore the rest.
+      
       const quoteMatch = v.match(/^\s*["']([^"']+)["']/);
-      if (quoteMatch) {
-        v = quoteMatch[1];
-      }
+      if (quoteMatch) v = quoteMatch[1];
+      
+      const cleanedValue = cleanTagValue(v);
 
-      if (m.type === "bg") {
-        if (!v) continue;
-        const valid = validateImage(v, "backgrounds");
-        if (valid) {
-          if (debugMode) appendDebug(`  -> Setting BG: ${valid}`, "success");
-          changeBackground(valid);
-        } else {
-          missing.push({ type: 'bg', value: v });
-          if (debugMode) appendDebug(`  -> BG not found: ${v}`, "error");
+      switch (m.type) {
+        case "bg": {
+            const valid = validateImage(cleanedValue, "backgrounds");
+            if (valid && handlers?.onBg) handlers.onBg(valid);
+            else if (valid) changeBackground(valid);
+            else missing.push({ type: 'bg', value: cleanedValue });
+            break;
         }
-      }
-
-      if (m.type === "sprite") {
-        if (!v) continue;
-        let valid = validateImage(v, "sprites");
-
-        // Fallback: if not a direct file match, try treating it as a character name
-        // This handles [SPRITE: Natasha] tags used for summoning
-        if (!valid) {
-          let name = v;
-          let mood = "default";
-
-          if (v.includes("/")) {
-            const parts = v.split("/");
-            mood = parts.pop();
-            name = parts.join("/");
-          } else if (v.includes("_")) {
-            const parts = v.split("_");
-            mood = parts.pop();
-            name = parts.join("_");
-          }
-
-          name = getCharacterName(name);
-          mood = cleanTagValue(mood);
-          if (mood.toLowerCase() === name) mood = "default";
-
-          const best = findBestSprite(name, mood);
-          if (best) {
-            valid = best;
-            if (debugMode) appendDebug(`  -> Fallback found: ${best}`, "info");
-          }
+        case "sprite": {
+            let valid = validateImage(cleanedValue, "sprites");
+            if (!valid) {
+                const best = findBestSprite(getCharacterName(cleanedValue), "default");
+                if (best) valid = best;
+            }
+            if (valid) {
+                if (handlers?.onSprite) handlers.onSprite(valid);
+                else updateSprite(valid);
+                spriteUpdated = true;
+            }
+            break;
         }
-
-        if (valid) {
-          updateSprite(valid);
-          spriteUpdated = true;
-          if (debugMode) appendDebug(`  -> Sprite updated: ${valid}`, "success");
+        case "splash": {
+            const valid = validateImage(cleanedValue, "splash");
+            if (valid) {
+                if (handlers?.onSplash) handlers.onSplash(valid);
+                else showSplash(valid);
+            } else {
+                // If invalid or empty, treat as clearing splash
+                if (handlers?.onSplash) handlers.onSplash(null);
+                else hideSplash();
+            }
+            break;
         }
-        else {
-          console.warn(`[Visual Novel] Invalid SPRITE tag ignored: ${v}`);
-          if (debugMode) appendDebug(`  -> Sprite not found: ${v}`, "error");
+        case "music": {
+            if (cleanedValue.toLowerCase() === "stop") {
+                if (handlers?.onMusic) handlers.onMusic(null); else playMusic(null);
+            } else {
+                const valid = validateImage(cleanedValue, "music");
+                if (valid && handlers?.onMusic) handlers.onMusic(valid); else if (valid) playMusic(valid);
+            }
+            break;
         }
-      }
-
-      if (m.type === "splash") {
-        if (!v) continue;
-        const valid = validateImage(v, "splash");
-        if (valid) showSplash(valid);
-        else {
-          console.warn(`[Visual Novel] Invalid SPLASH tag ignored: ${v}`);
-          if (debugMode) appendDebug(`  -> Splash not found: ${v}`, "error");
+        case "hide":
+            hideSprite(cleanedValue);
+            break;
+        case "fx":
+            triggerEffect(cleanedValue);
+            break;
+        case "sfx":
+            if (window.playSfx) window.playSfx(cleanedValue);
+            break;
+        case "camera": {
+            const action = cleanedValue.toLowerCase();
+            const targetName = m.target.toLowerCase();
+            if (action === 'zoom_in') {
+                const spriteImg = activeSprites.get(targetName);
+                if (spriteImg) spriteImg.classList.add('camera-zoom-in');
+            }
+            break;
         }
-      }
-
-      if (m.type === "music") {
-        if (!v) continue;
-        if (v.toLowerCase() === "stop") {
-          playMusic(null);
-          continue;
-        }
-        const valid = validateImage(v, "music");
-        if (valid) playMusic(valid);
-        else {
-          console.warn(`[Visual Novel] Invalid MUSIC tag ignored: ${v}`);
-          if (debugMode) appendDebug(`  -> Music not found: ${v}`, "error");
-        }
-      }
-
-      if (m.type === "hide") {
-        if (!v) continue;
-        hideSprite(v);
-        if (debugMode) appendDebug(`  -> Hiding: ${v}`);
-      }
-
-      if (m.type === "fx") {
-        if (!v) continue;
-        triggerEffect(v);
+        // Inventory actions
+        case "take":
+            if (store && store.takeObject) store.takeObject(cleanedValue);
+            break;
+        case "drop": // This will remove from inventory and add to scene
+            if (store && store.addObjectToScene) {
+                // This requires a new action to remove from inventory. For now, let's assume drop just adds it to the scene.
+                store.addObjectToScene(cleanedValue);
+            }
+            break;
+        case "add_object":
+            if (store && store.addObjectToScene) store.addObjectToScene(cleanedValue);
+            break;
       }
     }
 
@@ -919,6 +822,8 @@
 
   window.showSplash = showSplash;
   window.hideSplash = hideSplash;
+  window.showThoughtBubble = showThoughtBubble;
+  window.setDialogue = setDialogue;
 
   window.triggerEffect = triggerEffect;
   window.setCharSpeaking = setCharSpeaking;

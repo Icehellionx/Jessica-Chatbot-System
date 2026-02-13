@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
     saveLorebook: (content) => ipcRenderer.invoke('save-lorebook', content),
     getImages: () => ipcRenderer.invoke('get-images'),
     getImageManifest: () => ipcRenderer.invoke('get-image-manifest'),
+    getInnerMonologue: (charName, messages) => ipcRenderer.invoke('get-inner-monologue', charName, messages),
     saveCurrentChat: (data) => ipcRenderer.invoke('save-current-chat', data),
     clearVoiceMap: () => ipcRenderer.invoke('clear-voice-map'),
     getVoiceMap: () => ipcRenderer.invoke('get-voice-map'),
@@ -37,5 +38,6 @@ contextBridge.exposeInMainWorld('api', {
         ipcRenderer.on('chat-reply-chunk', subscription);
         return () => ipcRenderer.removeListener('chat-reply-chunk', subscription);
     },
-    evolveCharacterState: (messages, activeChars) => ipcRenderer.invoke('evolve-character-state', messages, activeChars)
+    evolveCharacterState: (messages, activeChars) => ipcRenderer.invoke('evolve-character-state', messages, activeChars),
+    toggleDevTools: (open) => ipcRenderer.invoke('toggle-dev-tools', open)
 });

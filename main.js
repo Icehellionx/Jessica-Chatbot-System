@@ -4,6 +4,14 @@ const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+let paths = {};
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
 /* ============================================================================
    MAIN PROCESS BOOTSTRAP
    - Creates folders
@@ -19,45 +27,7 @@ const fs = require('fs');
  * - disable-http-cache can impact performance.
  * - autoplay-policy no-user-gesture-required is convenient but may have side effects.
  */
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-app.commandLine.appendSwitch('disable-http-cache');
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-
-/* ------------------------------ PATHS ----------------------------------- */
-
-const userDataPath = app.getPath('userData');
-
-const paths = {
-  userDataPath,
-  configPath: path.join(userDataPath, 'config.json'),
-  chatsPath: path.join(userDataPath, 'chats'),
-
-  // You currently store both “files” and “images” under bot/files.
-  // If you later split, set botImagesPath to a different directory.
-  botFilesPath: path.join(__dirname, 'bot', 'files'),
-  botImagesPath: path.join(__dirname, 'bot', 'files'),
-
-  personaPath: path.join(userDataPath, 'persona.json'),
-  summaryPath: path.join(userDataPath, 'summary.json'),
-  currentChatPath: path.join(userDataPath, 'current-chat.json'),
-  advancedPromptPath: path.join(__dirname, 'bot', 'files', 'advanced_prompt.txt'),
-  characterStatePath: path.join(userDataPath, 'character_state.json'),
-  lorebookPath: path.join(userDataPath, 'aura_lorebook.json'),
-  voiceMapPath: path.join(userDataPath, 'voice_map.json'),
-  voiceBucketsPath: path.join(userDataPath, 'voice_buckets.json'),
-};
-
-/* ------------------------------ DIR SETUP -------------------------------- */
-
-function ensureDir(dirPath) {
-  try {
-    fs.mkdirSync(dirPath, { recursive: true });
-  } catch (e) {
-    console.error(`[FS] Failed to create dir: ${dirPath}`, e);
-  }
-}
-
-function ensureRequiredDirs() {
+function ensureRequiredDirs(paths) {
   // App storage
   ensureDir(paths.userDataPath);
   ensureDir(paths.chatsPath);
@@ -113,7 +83,7 @@ function resolveSafeResourcePath(rootDir, requestedPath) {
   return fullResolved;
 }
 
-function registerBotResourceProtocol() {
+function registerBotResourceProtocol(paths) {
   const cache = new Map(); // requestedRel -> resolved absolute
 
   const tryExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp3', '.wav', '.ogg'];
@@ -229,13 +199,41 @@ function autosaveIfNeeded() {
 /* ------------------------------ APP LIFECYCLE ---------------------------- */
 
 app.whenReady().then(() => {
-  ensureRequiredDirs();
-  registerBotResourceProtocol();
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  app.commandLine.appendSwitch('disable-http-cache');
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+  const userDataPath = app.getPath('userData');
+
+  paths = {
+    userDataPath,
+    configPath: path.join(userDataPath, 'config.json'),
+    chatsPath: path.join(userDataPath, 'chats'),
+
+    // You currently store both “files” and “images” under bot/files.
+    // If you later split, set botImagesPath to a different directory.
+    botFilesPath: path.join(__dirname, 'bot', 'files'),
+    botImagesPath: path.join(__dirname, 'bot', 'files'),
+
+    personaPath: path.join(userDataPath, 'persona.json'),
+    summaryPath: path.join(userDataPath, 'summary.json'),
+    currentChatPath: path.join(userDataPath, 'current-chat.json'),
+    advancedPromptPath: path.join(__dirname, 'bot', 'files', 'advanced_prompt.txt'),
+    characterStatePath: path.join(userDataPath, 'character_state.json'),
+    lorebookPath: path.join(userDataPath, 'aura_lorebook.json'),
+    voiceMapPath: path.join(userDataPath, 'voice_map.json'),
+    voiceBucketsPath: path.join(userDataPath, 'voice_buckets.json'),
+  };
+
+  ensureRequiredDirs(paths);
+  registerBotResourceProtocol(paths);
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  require('./ipcHandlers')(paths);
 });
 
 app.on('window-all-closed', () => {
@@ -247,5 +245,3 @@ app.on('window-all-closed', () => {
 });
 
 /* ------------------------------ IPC HANDLERS ----------------------------- */
-
-require('./ipcHandlers')(paths);
