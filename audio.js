@@ -669,6 +669,8 @@ class VoiceEngine {
 }
 
 window.voice = new VoiceEngine();
+window.playMusic = playMusic;
+window.setupVolumeControls = setupVolumeControls;
 window.getCurrentMusicFilename = getCurrentMusicFilename;
 window.playSfx = playSfx; // <-- EXPORT THE NEW FUNCTION
 

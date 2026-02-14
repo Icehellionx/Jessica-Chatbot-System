@@ -1,12 +1,22 @@
 'use strict';
 
-const { ipcMain, nativeImage } = require('electron');
+const { ipcMain, nativeImage, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const aiService = require('./ai_services');
 const axios = require('axios');
 const { execFile } = require('child_process');
 const os = require('os');
+const { createConfigStore } = require('./ipc/config-store');
+const { createChatStorage } = require('./ipc/chat-storage');
+const { sanitizeFilename } = require('./ipc/sanitize');
+const contextWindow = require('./ipc/context-window');
+const trace = require('./ipc/trace');
+const { registerConfigHandlers } = require('./ipc/handlers-config');
+const { registerChatHandlers } = require('./ipc/handlers-chat');
+const { registerMediaHandlers } = require('./ipc/handlers-media');
+const { registerVoiceHandlers } = require('./ipc/handlers-voice');
+const { registerAiHandlers } = require('./ipc/handlers-ai');
 
 /* ============================================================================
    IPC MAIN HANDLERS (Electron)
@@ -22,7 +32,7 @@ const CACHE_TTL_MS = 60_000;
 
 const MEDIA_EXT_RE = /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i;
 
-const PROVIDER_CATEGORIES = ['backgrounds', 'sprites', 'splash', 'music'];
+const PROVIDER_CATEGORIES = ['backgrounds', 'sprites', 'splash', 'music', 'sfx'];
 const SPRITES_SPECIAL_PREFIXES = new Set(['sprites', 'characters', 'backgrounds', 'splash', 'music']);
 
 const DEFAULT_PERSONA = { name: 'Jim', details: '' };
@@ -58,9 +68,19 @@ function writeJsonSafe(filePath, data) {
   try {
     const tmp = `${filePath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmp, filePath);
+    try {
+      fs.renameSync(tmp, filePath);
+    } catch (e) {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        fs.renameSync(tmp, filePath);
+      } else {
+        throw e;
+      }
+    }
     return true;
-  } catch {
+  } catch (e) {
+    console.error(`[FileIO] Failed to write JSON to ${filePath}:`, e);
     return false;
   }
 }
@@ -69,18 +89,21 @@ function writeTextSafe(filePath, text) {
   try {
     const tmp = `${filePath}.tmp`;
     fs.writeFileSync(tmp, String(text ?? ''), 'utf8');
-    fs.renameSync(tmp, filePath);
+    try {
+      fs.renameSync(tmp, filePath);
+    } catch (e) {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        fs.renameSync(tmp, filePath);
+      } else {
+        throw e;
+      }
+    }
     return true;
-  } catch {
+  } catch (e) {
+    console.error(`[FileIO] Failed to write text to ${filePath}:`, e);
     return false;
   }
-}
-
-function sanitizeFilename(name) {
-  return String(name ?? '')
-    .replace(/[^a-z0-9]/gi, '_')
-    .toLowerCase()
-    .slice(0, 80) || 'chat';
 }
 
 /* ------------------------------ MEDIA UTILS ------------------------------ */
@@ -368,16 +391,18 @@ function buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, r
   }
 
   visualPrompt += `\n\nINSTRUCTIONS:
-1. Output visual tags ONLY at the start or end of the message.
-2. [BG: "name"] changes background. If the location is new, invent a descriptive name (e.g. "zoo_entrance", "sunny_beach").
-3. [SPRITE: "Char/Name"] updates character.
-4. [SPLASH: "name"] overrides all.
-5. [MUSIC: "name"] plays background music.
-6. Max 4 characters.
-7. [HIDE: "Char"] removes character. [HIDE: "All"] removes everyone.
-8. Sprites are STICKY. Only tag on change.
-9. [FX: "shake"|"flash"] for visual effects.
-10. STRICTLY format dialogue as Name: "Speech". Do not use prose.`;
+1. Start your response with a [SCENE] ... [/SCENE] block.
+2. Inside the block, list ALL visual changes for this turn:
+   - [BG: "name"] for background.
+   - [SPRITE: "Name/Emotion"] for active characters.
+   - [HIDE: "Name"] to remove characters.
+   - [MUSIC: "name"] for audio.
+   - [FX: "name"] for effects.
+3. [SPLASH: "name"] overrides all.
+4. Max 4 characters on screen.
+5. Sprites are STICKY. Only tag on change.
+6. After [/SCENE], write the dialogue/narration.
+7. STRICTLY format dialogue as Name: "Speech".`;
 
   return visualPrompt;
 }
@@ -801,15 +826,35 @@ module.exports = function registerIpcHandlers(paths) {
   } = paths;
 
   const cache = createCache();
+  const chatStorage = createChatStorage({
+    chatsPath,
+    path,
+    fs,
+    sanitizeFilename,
+    readJsonSafe,
+    writeJsonSafe,
+  });
 
   /* ---- Config accessors ---- */
 
+  const configStore = createConfigStore({
+    configPath,
+    readJsonSafe,
+    writeJsonSafe,
+    clone: structuredCloneSafe,
+    safeStorage,
+  });
+
   function loadConfig() {
-    return readJsonSafe(configPath, {});
+    return configStore.load();
   }
 
   function saveConfig(config) {
-    return writeJsonSafe(configPath, config);
+    return configStore.save(config);
+  }
+
+  function toPublicConfig(config) {
+    return configStore.toPublic(config);
   }
 
   /* ---- Cached getters ---- */
@@ -841,761 +886,202 @@ module.exports = function registerIpcHandlers(paths) {
     return cache.set(key, files);
   }
 
-  /* ------------------------------ IPC: BASIC ----------------------------- */
+  // --- Sidecar / Utility Handlers ---
 
-  ipcMain.handle('get-config', () => loadConfig());
-
-  ipcMain.handle('save-api-key', (_event, provider, key, model, baseUrl) => {
+  ipcMain.handle('get-stage-directions', async (event, text, activeCharacters, context = {}) => {
     const config = loadConfig();
+    const manifest = getManifest();
+    
+    // Pass available assets to help the small model hallucinate less
+    const availableBackgrounds = Object.keys(manifest.backgrounds || {});
+    const availableMusic = Object.keys(manifest.music || {});
+    const availableSfx = Object.keys(manifest.sfx || {});
 
-    config.apiKeys ??= {};
-    config.models ??= {};
-    config.baseUrls ??= {};
-
-    config.apiKeys[provider] = key;
-
-    // Only overwrite if provided (avoid deleting existing values accidentally)
-    if (model) config.models[provider] = model;
-    if (baseUrl) config.baseUrls[provider] = baseUrl;
-
-    config.activeProvider = provider;
-
-    return saveConfig(config) ? config : null;
+    const tags = await aiService.analyzeScene(config, text, {
+      availableBackgrounds,
+      availableMusic,
+      availableSfx,
+      activeCharacters,
+      recentMessages: context.recentMessages,
+      currentBackground: context.currentBackground,
+      currentMusic: context.currentMusic,
+      inventory: context.inventory,
+      sceneObjects: context.sceneObjects,
+      lastRenderReport: context.lastRenderReport,
+    });
+    return tags;
   });
 
-  ipcMain.handle('delete-api-key', (_event, provider) => {
+  ipcMain.handle('get-reply-suggestions', async (event, messages) => {
     const config = loadConfig();
-
-    if (config?.apiKeys?.[provider]) {
-      delete config.apiKeys[provider];
-      if (config.activeProvider === provider) delete config.activeProvider;
-      saveConfig(config);
-    }
-
-    return config;
+    return aiService.generateReplySuggestions(config, messages);
   });
 
-  ipcMain.handle('set-active-provider', (_event, provider) => {
+  ipcMain.handle('get-chapter-title', async (event, messages) => {
     const config = loadConfig();
-
-    if (config?.apiKeys?.[provider]) {
-      config.activeProvider = provider;
-      return saveConfig(config);
-    }
-    return false;
+    return aiService.generateChapterTitle(config, messages);
   });
 
-  ipcMain.handle('save-persona', (_e, persona) => writeJsonSafe(personaPath, persona));
-  ipcMain.handle('get-persona', () => {
-    const p = readJsonSafe(personaPath, DEFAULT_PERSONA);
-    return p?.name ? p : DEFAULT_PERSONA;
+  ipcMain.handle('summarize-chat', async (event, text, prevSummary) => {
+    const config = loadConfig();
+    return aiService.summarizeChat(config, text, prevSummary);
   });
 
-  ipcMain.handle('save-summary', (_e, summary) => writeJsonSafe(summaryPath, summary));
-  ipcMain.handle('get-summary', () => {
-    const s = readJsonSafe(summaryPath, DEFAULT_SUMMARY);
-    return s?.content != null ? s : DEFAULT_SUMMARY;
+  ipcMain.handle('get-quest-objective', async (event, messages) => {
+    const config = loadConfig();
+    return aiService.generateQuestObjective(config, messages);
   });
 
-  ipcMain.handle('get-lorebook', () => {
-    const l = readJsonSafe(lorebookPath, []);
-    return Array.isArray(l) ? l : [];
-  });
-  ipcMain.handle('save-lorebook', (_e, content) => writeJsonSafe(lorebookPath, content));
-
-  ipcMain.handle('get-advanced-prompt', () => readTextSafe(advancedPromptPath, ''));
-  ipcMain.handle('save-advanced-prompt', (_e, prompt) => writeTextSafe(advancedPromptPath, prompt));
-
-  ipcMain.handle('save-temperature', (_e, t) => {
-    const c = loadConfig();
-    c.temperature = Number(t);
-    return saveConfig(c);
+  ipcMain.handle('get-affinity', async (event, messages, charName) => {
+    const config = loadConfig();
+    return aiService.analyzeAffinity(config, messages, charName);
   });
 
-  ipcMain.handle('save-max-context', (_e, l) => {
-    const c = loadConfig();
-    c.maxContext = Number.parseInt(l, 10);
-    return saveConfig(c);
+  ipcMain.handle('cleanup-response', async (event, text) => {
+    const config = loadConfig();
+    return aiService.cleanupResponse(config, text);
   });
 
-  ipcMain.handle('toggle-dev-tools', (event, open) => {
-    if (open === undefined || open === null) {
-      event.sender.toggleDevTools();
-    } else if (open) {
-      event.sender.openDevTools({ mode: 'detach' });
-    } else {
-      event.sender.closeDevTools();
-    }
+  ipcMain.handle('extract-user-facts', async (event, messages) => {
+    const config = loadConfig();
+    return aiService.extractUserFacts(config, messages);
   });
 
-  ipcMain.handle('clear-voice-map', () => {
-    try {
-      if (fs.existsSync(voiceMapPath)) fs.unlinkSync(voiceMapPath);
-      return true;
-    } catch (e) {
-      return false;
-    }
+  ipcMain.handle('expand-image-prompt', async (event, text) => {
+    const config = loadConfig();
+    return aiService.expandImagePrompt(config, text);
   });
 
-  ipcMain.handle('get-voice-map', () => getVoiceMap(voiceMapPath, botFilesPath));
-  
-  ipcMain.handle('save-voice-map', (_e, map) => {
-    writeJsonSafe(voiceMapPath, map);
+  ipcMain.handle('find-closest-sprite', async (event, request, availableFiles) => {
+    const config = loadConfig();
+    return aiService.findClosestSprite(config, request, availableFiles);
+  });
+
+  ipcMain.handle('save-director-mode', async (event, mode) => {
+    const cfg = loadConfig();
+    cfg.directorMode = mode;
+    saveConfig(cfg);
     return true;
   });
 
-  ipcMain.handle('scan-voice-buckets', async () => {
-    // Reset buckets to ensure clean state
-    const buckets = { male: [], female: [] };
-    const piperDir = path.resolve(botFilesPath, '../tools/piper');
-    const piperBinary = process.platform === 'win32' ? 'piper.exe' : 'piper';
-    const piperPath = path.join(piperDir, piperBinary);
-    
-    // Auto-detect model
-    let modelName = 'en_US-libritts_r-medium.onnx';
-    if (!fs.existsSync(path.join(piperDir, modelName))) {
-      const found = fs.readdirSync(piperDir).find(f => f.endsWith('.onnx'));
-      if (found) modelName = found;
-    }
-    const modelPath = path.join(piperDir, modelName);
-
-    if (!fs.existsSync(piperPath) || !fs.existsSync(modelPath)) return { success: false, message: "Piper not found" };
-
-    // 1. Try Name-Based Bucketing from Config (Fastest)
-    let jsonPath = modelPath + '.json';
-    if (!fs.existsSync(jsonPath)) jsonPath = modelPath.replace(/\.onnx$/, '.json');
-    
-    let added = 0;
-    let method = "Pitch Scan";
-
-    if (fs.existsSync(jsonPath)) {
-      try {
-        const config = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-        if (config.speaker_id_map) {
-          for (const [name, id] of Object.entries(config.speaker_id_map)) {
-            const lower = name.toLowerCase();
-            // Heuristics based on user provided list + common names
-            if (lower.match(/^f\d+$/) || ['belinda', 'alicia', 'anika', 'annie', 'linda', 'shelby', 'steph', 'whisperf', 'salli', 'amy', 'kimberly'].includes(lower)) {
-              buckets.female.push(id);
-              added++;
-            } else if (lower.match(/^m\d+$/) || ['adam', 'alex', 'andy', 'boris', 'david', 'edward', 'gene', 'john', 'mike', 'paul', 'robert', 'travis', 'joey', 'brian', 'matthew'].includes(lower)) {
-              buckets.male.push(id);
-              added++;
-            }
-          }
-          if (added > 0) method = "Name Map";
-        }
-      } catch (e) { console.error("Config parse error", e); }
-    }
-
-    // 2. Fallback to Pitch Scan if no names found (e.g. raw Libritts)
-    if (added === 0) {
-      // Scan 50 random IDs
-      for (let i = 0; i < 50; i++) {
-        const id = Math.floor(Math.random() * 900);
-        const pitch = await checkVoiceGender(piperPath, modelPath, piperDir, id, 'X', paths.userDataPath);
-        if (pitch > 175) { buckets.female.push(id); added++; }
-        else if (pitch > 60 && pitch < 155) { buckets.male.push(id); added++; }
-      }
-    }
-
-    writeJsonSafe(voiceBucketsPath, buckets);
-    return { success: true, message: `Method: ${method}. Added ${added} voices to buckets.` };
-  });
-
-  /* ------------------------------ IPC: FILES ----------------------------- */
-
-  ipcMain.handle('get-images', () => ({
-    backgrounds: getFiles('backgrounds'),
-    sprites: getFiles('sprites'),
-    splash: getFiles('splash'),
-    music: getFiles('music'),
-  }));
-
-  ipcMain.handle('get-image-manifest', () => {
-    const manifest = getManifest();
-
-    // Ensure all disk files exist in manifest so UI can reference them
-    for (const category of PROVIDER_CATEGORIES) {
-      const files = getFiles(category);
-      ensureManifestCoverage(manifest, category, files);
-    }
-
-    return manifest;
-  });
-
-  ipcMain.handle('get-bot-info', () => {
-    const readBot = (rel) => readTextSafe(path.join(botFilesPath, rel), '').trim();
-
-    const charDir = path.join(botFilesPath, 'characters');
-    const characters = {};
-
-    if (fs.existsSync(charDir)) {
-      for (const entry of fs.readdirSync(charDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-
-        const p = readBot(`characters/${entry.name}/personality.txt`);
-        if (p) characters[entry.name] = p;
-      }
-    }
-
-    let spriteSizes = {};
-    try {
-      const raw = readTextSafe(path.join(botFilesPath, 'sprite_size.txt'), '{}');
-      if (raw.trim()) spriteSizes = JSON.parse(raw);
-    } catch (e) {
-      console.warn('Failed to parse sprite_size.txt', e);
-    }
-
-    return {
-      personality: readBot('personality.txt'),
-      scenario: readBot('scenario.txt'),
-      initial: readBot('initial.txt'),
-      characters,
-      spriteSizes,
-    };
-  });
-
-  /* ------------------------------ IPC: CHATS ----------------------------- */
-
-  ipcMain.handle('save-chat', (_event, name, messages) => {
-    const safeName = sanitizeFilename(name);
-    const payload = {
-      messages,
-      characterState: readJsonSafe(characterStatePath, {}),
-      lorebook: readJsonSafe(lorebookPath, []),
-      timestamp: Date.now(),
-    };
-    return writeJsonSafe(path.join(chatsPath, `${safeName}.json`), payload);
-  });
-
-  ipcMain.handle('get-chats', () => {
-    try {
-      return fs.readdirSync(chatsPath)
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.replace('.json', ''));
-    } catch {
-      return [];
-    }
-  });
-
-  ipcMain.handle('load-chat', (_event, name) => {
-    const data = readJsonSafe(path.join(chatsPath, `${name}.json`), null);
-
-    // New format
-    if (data && data.messages) {
-      if (data.characterState) writeJsonSafe(characterStatePath, data.characterState);
-      if (data.lorebook) writeJsonSafe(lorebookPath, data.lorebook);
-      return data.messages;
-    }
-
-    // Legacy format: raw array of messages
-    return Array.isArray(data) ? data : [];
-  });
-
-  ipcMain.handle('save-current-chat', (_e, d) => writeJsonSafe(currentChatPath, d));
-  ipcMain.handle('load-current-chat', () => readJsonSafe(currentChatPath, {}));
-
-  /* ------------------------------ IPC: AI ------------------------------- */
-
-  ipcMain.handle('get-inner-monologue', async (_event, characterName, messages) => {
+  ipcMain.handle('determine-active-context', async (event, messages, candidates) => {
     const config = loadConfig();
-    const cleanMessages = cleanMessagesForApi(messages);
-    return aiService.fetchInnerMonologue(config, characterName, cleanMessages);
+    return aiService.determineActiveContext(config, messages, candidates);
   });
 
-  ipcMain.handle('test-provider', async () => aiService.testConnection(loadConfig()));
+  ipcMain.handle('check-file-exists', async (event, relativePath) => {
+    const fullPath = resolveMediaAbsolutePath({ botImagesPath: paths.botImagesPath, botFilesPath: paths.botFilesPath }, relativePath);
+    return fs.existsSync(fullPath);
+  });
 
-  /**
-   * Character state evolution:
-   * - Feeds recent messages + current state + original personalities
-   * - Expects JSON only; merges into state file
-   * - Extracts NewLore objects into lorebook array
-   */
-  ipcMain.handle('evolve-character-state', async (_event, messages, activeCharacters) => {
-    if (!Array.isArray(activeCharacters) || activeCharacters.length === 0) return null;
-
-    const config = loadConfig();
-
-    // Include a small slice of original personality for grounding
-    let originalPersonalities = '';
-    for (const name of activeCharacters) {
-      const charPath = path.join(botFilesPath, 'characters', name, 'personality.txt');
-      if (fs.existsSync(charPath)) {
-        const text = readTextSafe(charPath, '').slice(0, 5000);
-        originalPersonalities += `\n[${name}'s ORIGINAL CORE PERSONALITY]\n${text}...`;
-      }
-    }
-
-    const currentState = readJsonSafe(characterStatePath, {});
-    const recentHistory = (messages ?? [])
-      .slice(-5)
-      .map(m => `${m.role}: ${String(m.content ?? '')}`)
-      .join('\n');
-
-    const systemPrompt =
-      'You are a narrative engine. Update the internal psychological state of the characters based on the recent conversation. Output JSON only.';
-
-    const userPrompt =
-`[CONTEXT]
-${originalPersonalities}
-[CURRENT STATE]
-${JSON.stringify(currentState, null, 2)}
-[RECENT INTERACTION]
-${recentHistory}
-[INSTRUCTIONS]
-Analyze the recent interaction.
-1. Update the state for: ${activeCharacters.join(', ')}.
-2. [DRIFT CORRECTION]: Check if the current state has drifted from the [ORIGINAL CORE PERSONALITY]. If so, correct the Mood/Thoughts to realign with the character's true nature.
-Fields to update:
-- Mood: Current emotional baseline.
-- Trust: Level of trust in the user.
-- Thoughts: Internal monologue or current goal.
-- NewLore: If a NEW significant fact about the world or characters is established that should be remembered long-term, output an object { "keywords": ["key1", "key2"], "scenario": "Fact description" }. Otherwise null.
-Output a JSON object keyed by character name containing these fields.`;
-
+  // --- Background Preload ---
+  // Fire and forget: Load the local model into RAM now so it's ready later.
+  setTimeout(async () => {
     try {
-      const responseText = await aiService.generateCompletion(config, [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
-
-      if (!responseText) return null;
-
-      // Extract the first JSON object block (defensive)
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return null;
-
-      const updates = JSON.parse(jsonMatch[0]);
-
-      // Pull NewLore out into lorebook
-      const currentLore = readJsonSafe(lorebookPath, []);
-      const loreArray = Array.isArray(currentLore) ? currentLore : [];
-
-      for (const update of Object.values(updates)) {
-        if (update?.NewLore?.scenario && update?.NewLore?.keywords) {
-          loreArray.push(update.NewLore);
-          delete update.NewLore;
-        }
-      }
-
-      // Deduplicate Lorebook
-      const uniqueLore = [];
-      const seenSigs = new Set();
-      for (const entry of loreArray) {
-        const sig = JSON.stringify({ k: (entry.keywords || []).sort(), c: (entry.scenario || entry.entry || '').trim() });
-        if (!seenSigs.has(sig)) {
-          seenSigs.add(sig);
-          uniqueLore.push(entry);
-        }
-      }
-
-      writeJsonSafe(lorebookPath, uniqueLore);
-
-      const merged = { ...currentState, ...updates };
-      writeJsonSafe(characterStatePath, merged);
-      return merged;
+      const config = loadConfig();
+      console.log('[System] Checking for Embedded AI Model...');
+      await aiService.preloadEmbeddedModel(config);
     } catch (e) {
-      console.error('Evolution failed:', e);
-      return null;
+      console.log('[System] Embedded model not preloaded (this is normal if not installed).');
     }
+  }, 1000);
+
+  registerConfigHandlers({
+    ipcMain,
+    loadConfig,
+    saveConfig,
+    toPublicConfig,
+    readJsonSafe,
+    readTextSafe,
+    writeJsonSafe,
+    personaPath,
+    summaryPath,
+    lorebookPath,
+    advancedPromptPath,
+    DEFAULT_PERSONA,
+    DEFAULT_SUMMARY,
+    trace,
   });
 
-  /**
-   * Scan images and auto-label them via vision.
-   * Updates botFilesPath/images.json manifest.
-   */
-  ipcMain.handle('scan-images', async () => {
-    const config = loadConfig();
-    const settings = aiService.getProviderSettings(config);
-
-    if (!settings.apiKey && settings.provider !== 'local') {
-      return { success: false, message: 'No API key found.' };
-    }
-
-    const manifestPath = path.join(botFilesPath, 'images.json');
-    const manifest = readJsonSafe(manifestPath, {});
-    for (const k of PROVIDER_CATEGORIES) if (!manifest[k]) manifest[k] = {};
-
-    let updated = false;
-
-    const BATCH_SIZE = 3;
-
-    async function processCategory(category) {
-      const files = listCategoryFiles({ botImagesPath, botFilesPath }, category);
-      const toProcess = files.filter(f => !manifest[category][f]);
-
-      for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
-        const batch = toProcess.slice(i, i + BATCH_SIZE);
-
-        await Promise.all(batch.map(async (rel) => {
-          console.log(`[Image Scan] Analyzing: ${rel}`);
-
-          try {
-            const abs = resolveMediaAbsolutePath({ botImagesPath, botFilesPath }, rel);
-            const buffer = await fs.promises.readFile(abs);
-            const mimeType = getMimeType(abs);
-
-            if (mimeType.startsWith('audio/')) {
-              manifest[category][rel] = 'Audio file';
-              updated = true;
-              return;
-            }
-
-            // Vision prompt: short VN-friendly label
-            const result = await aiService.generateCompletion(
-              config,
-              [{
-                role: 'user',
-                content: [
-                  { type: 'text', text: 'Describe this image in 5 words or less for a visual novel script.' },
-                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${buffer.toString('base64')}` } },
-                ],
-              }],
-              { max_tokens: 50 }
-            );
-
-            if (result) {
-              manifest[category][rel] = result.trim();
-              updated = true;
-            }
-          } catch (e) {
-            console.error(`[Image Scan] Error ${rel}:`, e?.message ?? e);
-          }
-        }));
-      }
-    }
-
-    for (const category of PROVIDER_CATEGORIES) {
-      await processCategory(category);
-    }
-
-    if (updated) {
-      writeJsonSafe(manifestPath, manifest);
-      cache.invalidate(); // files + manifest might change
-      return { success: true, message: 'Manifest updated.' };
-    }
-
-    return { success: true, message: 'No new images found.' };
+  registerMediaHandlers({
+    ipcMain,
+    fs,
+    path,
+    axios,
+    nativeImage,
+    aiService,
+    loadConfig,
+    readJsonSafe,
+    readTextSafe,
+    writeJsonSafe,
+    getFiles,
+    getManifest,
+    ensureManifestCoverage,
+    listCategoryFiles,
+    resolveMediaAbsolutePath,
+    getMimeType,
+    cache,
+    sanitizeFilename,
+    botFilesPath,
+    botImagesPath,
+    PROVIDER_CATEGORIES,
+    trace,
   });
 
-  /**
-   * Image Generation (Pollinations.ai)
-   * Uses a free remote API so no local installation is required.
-   * Perfect for distributing the app to others.
-   */
-  ipcMain.handle('generate-image', async (_event, prompt, type) => {
-    try {
-      // Construct prompt for anime style backgrounds
-      const enhancedPrompt = `(masterpiece, best quality), ${prompt}, detailed scenery, visual novel background, style of Makoto Shinkai, anime style, no characters`;
-      const encodedPrompt = encodeURIComponent(enhancedPrompt);
-      const seed = Math.floor(Math.random() * 1000000);
-      
-      // Pollinations API (Free, No Key)
-      // We request flux model for better quality
-      const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=576&seed=${seed}&nologo=true&model=flux`;
-
-      console.log(`[Image Gen] Fetching from: ${url}`);
-      const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
-      
-      if (response.data) {
-        // 2. Process & Compress
-        const buffer = Buffer.from(response.data);
-        const img = nativeImage.createFromBuffer(buffer);
-        const jpegBuffer = img.toJPEG(80); // 80% quality saves ~90% disk space
-
-        // 3. Save
-        const genDir = path.join(botImagesPath, 'backgrounds', 'generated');
-        fs.mkdirSync(genDir, { recursive: true });
-        
-        const filename = `gen_${Date.now()}_${sanitizeFilename(prompt).slice(0, 20)}.jpg`;
-        const absPath = path.join(genDir, filename);
-        const relPath = `backgrounds/generated/${filename}`;
-        
-        fs.writeFileSync(absPath, jpegBuffer);
-
-        // Prune old generated backgrounds (keep last 15)
-        try {
-          const MAX_GENERATED = 15;
-          const files = fs.readdirSync(genDir).filter(f => f.startsWith('gen_'));
-          
-          if (files.length > MAX_GENERATED) {
-            // Sort by filename (timestamp is prefix, so lexicographical = chronological)
-            files.sort();
-            const toDelete = files.slice(0, files.length - MAX_GENERATED);
-            for (const f of toDelete) {
-              fs.unlinkSync(path.join(genDir, f));
-            }
-            console.log(`[Image Gen] Pruned ${toDelete.length} old background(s).`);
-          }
-        } catch (e) {
-          console.warn("[Image Gen] Pruning error:", e);
-        }
-        
-        // 4. Update Cache
-        cache.invalidate('files:backgrounds');
-        return relPath;
-      }
-    } catch (e) {
-      console.error("Image Gen Error:", e.message);
-    }
-    return null;
+  registerChatHandlers({
+    ipcMain,
+    chatStorage,
+    readJsonSafe,
+    writeJsonSafe,
+    characterStatePath,
+    lorebookPath,
+    currentChatPath,
+    trace,
+  });
+  registerVoiceHandlers({
+    ipcMain,
+    fs,
+    path,
+    process,
+    axios,
+    execFile,
+    checkVoiceGender,
+    getVoiceMap,
+    getVoiceBuckets,
+    assignVoiceId,
+    writeJsonSafe,
+    botFilesPath,
+    voiceMapPath,
+    voiceBucketsPath,
+    userDataPath: paths.userDataPath,
+    trace,
   });
 
-  /**
-   * TTS Generation
-   * Returns base64 MP3 data or null (to fallback to browser TTS).
-   */
-  ipcMain.handle('generate-speech', async (_event, text, voiceId, forcedSpeakerId) => {
-    let audioData = null;
-    let piperError = null;
-
-    // 1. Try Local Piper TTS (Offline, Neural)
-    // Checks for: bot/tools/piper/piper.exe (Windows) or piper (Linux/Mac)
-    // and a voice model.
-    try {
-      // Resolve path: bot/files -> bot/tools/piper
-      const piperDir = path.resolve(botFilesPath, '../tools/piper');
-      const piperBinary = process.platform === 'win32' ? 'piper.exe' : 'piper';
-      const piperPath = path.join(piperDir, piperBinary);
-
-      if (fs.existsSync(piperPath)) {
-        // 1. Auto-detect model if default name isn't found
-        let modelName = 'en_US-libritts_r-medium.onnx';
-        if (!fs.existsSync(path.join(piperDir, modelName))) {
-          const found = fs.readdirSync(piperDir).find(f => f.endsWith('.onnx'));
-          if (found) modelName = found;
-        }
-
-        const modelPath = path.join(piperDir, modelName);
-        
-        // 1b. Check for config file (could be .onnx.json OR just .json)
-        let jsonPath = modelPath + '.json';
-        if (!fs.existsSync(jsonPath)) jsonPath = modelPath.replace(/\.onnx$/, '.json');
-
-        if (fs.existsSync(modelPath) && fs.existsSync(jsonPath)) {
-          // 2. Check if model supports multiple speakers
-          let isMultiSpeaker = false;
-          try {
-            const config = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-            // Check both num_speakers and speaker_id_map to be safe
-            isMultiSpeaker = (config.num_speakers > 1) || (config.speaker_id_map && Object.keys(config.speaker_id_map).length > 0);
-            console.log(`[Piper] Model: ${modelName}, Multi-Speaker: ${isMultiSpeaker}`);
-          } catch (e) {
-            console.log("[Piper] Config read error, defaulting to single speaker:", e.message);
-          }
-
-          // Use a temp file to avoid stdout binary corruption (static noise)
-          const tempFile = path.join(paths.userDataPath, `vn_tts_${Date.now()}.wav`);
-          // --length_scale 1.1 slows speech down by ~10%
-          const args = ['--model', modelPath, '--output_file', tempFile, '--length_scale', '1.1'];
-
-          if (isMultiSpeaker) {
-            let spkId;
-            
-            if (forcedSpeakerId !== undefined && forcedSpeakerId !== null) {
-              spkId = String(forcedSpeakerId);
-              console.log(`[Piper] Using forced Speaker ID: ${spkId}`);
-            } else {
-              // Dynamic Voice Assignment
-              let voiceMap = getVoiceMap(voiceMapPath, botFilesPath);
-              let buckets = getVoiceBuckets(voiceBucketsPath);
-              
-              if (voiceMap[voiceId] === undefined) {
-                // Assign from buckets if possible, otherwise fallback to hash
-                voiceMap[voiceId] = assignVoiceId(voiceId, botFilesPath, voiceMap, buckets);
-                writeJsonSafe(voiceMapPath, voiceMap);
-              }
-              spkId = String(voiceMap[voiceId]);
-              console.log(`[Piper] Generating for "${voiceId}" -> Speaker ID: ${spkId}`);
-            }
-
-            args.push('--speaker', spkId);
-          } else {
-            console.log("[Piper] Single speaker model detected. Ignoring voice map.");
-          }
-
-          console.log(`[Piper] Executing: ${piperBinary} ${args.join(' ')}`);
-          audioData = await new Promise((resolve, reject) => {
-            const child = execFile(
-              piperPath, 
-              args, 
-              { 
-                cwd: piperDir, // Important: Run inside dir so it finds dlls/config
-                windowsHide: true
-              }, 
-              async (err, stdout, stderr) => {
-                if (err) {
-                  console.warn("[Piper] Execution Error:", err);
-                  if (stderr) console.warn("[Piper] Stderr:", stderr.toString());
-                  reject(new Error(`Piper exited with error: ${err.message}. Stderr: ${stderr ? stderr.toString() : ''}`));
-                  return;
-                }
-
-                try {
-                  if (fs.existsSync(tempFile)) {
-                    const audioBuffer = await fs.promises.readFile(tempFile);
-                    try { await fs.promises.unlink(tempFile); } catch {} // Clean up
-
-                    if (audioBuffer.length >= 4 && audioBuffer.toString('utf8', 0, 4) === 'RIFF') {
-                      resolve(`data:audio/wav;base64,${audioBuffer.toString('base64')}`);
-                    } else {
-                      reject(new Error("Piper output file was not a valid WAV."));
-                    }
-                  } else {
-                    reject(new Error(`Piper produced no output file. Stderr: ${stderr ? stderr.toString() : ''}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`Failed to read Piper output: ${e.message}`));
-                }
-              }
-            );
-            
-            if (child.stdin) {
-              child.stdin.write(text);
-              child.stdin.end();
-            }
-          }).catch(e => {
-            piperError = e;
-            return null;
-          });
-        } else {
-          console.log(`[Piper] Missing files! Found .onnx: ${fs.existsSync(modelPath)}, Found .json: ${fs.existsSync(jsonPath)}`);
-          piperError = new Error("Piper model files (.onnx or .json) missing.");
-        }
-      } else {
-        // console.log(`[Piper] Binary not found at ${piperPath}`);
-        piperError = new Error(`Piper binary not found at ${piperPath}`);
-      }
-    } catch (e) {
-      console.log("[Piper] Setup failed:", e.message);
-      piperError = e;
-    }
-
-    if (audioData) return audioData;
-
-    // StreamElements TTS (Free, High Quality Wavenet)
-    // No API key required. Works "inside the program" via public API.
-    
-    const SE_VOICE_MAP = {
-      narrator: 'Matthew', // Deep US Male
-      jessica: 'Salli',    // Clear US Female
-      danny: 'Joey',       // US Male
-      jake: 'Brian',       // British Male (The classic "Streamer" voice, fits a nerd archetype)
-      natasha: 'Amy',      // British Female (Sophisticated)
-      suzie: 'Kimberly',   // Higher pitch US Female
-      character_generic_male: 'Joey',
-      character_generic_female: 'Joanna'
-    };
-
-    const seVoice = SE_VOICE_MAP[voiceId] || 'Joanna';
-
-    try {
-      // Fetch MP3 from StreamElements
-      const url = 'https://api.streamelements.com/kappa/v2/speech';
-      const response = await axios.get(url, {
-        params: {
-          voice: seVoice,
-          text: text
-        },
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        responseType: 'arraybuffer'
-      });
-      
-      // Verify content type to avoid playing error HTML as audio
-      if (response.headers['content-type']?.includes('audio')) {
-        return `data:audio/mp3;base64,${Buffer.from(response.data).toString('base64')}`;
-      } else {
-        console.warn("[StreamElements] API returned non-audio:", response.headers['content-type']);
-      }
-    } catch (e) {
-      console.warn("StreamElements TTS failed (offline?), falling back to browser:", e.message);
-    }
-
-    // If we are here, both methods failed. Throw the Piper error if it existed, as that's likely what the user is debugging.
-    if (piperError) throw piperError;
-    throw new Error("Audio generation failed (Piper missing/broken and StreamElements unreachable).");
-  });
-
-  /**
-   * Clean messages for API consumption.
-   * Removes internal fields like 'swipes', 'swipeId' that would confuse the LLM.
-   */
-  function cleanMessagesForApi(messages) {
-    return messages.map(m => ({
-      role: m.role,
-      content: m.content
-    }));
-  }
-
-  /**
-   * Main chat send:
-   * - Builds VN visual prompt
-   * - Injects enforcement + state + lore + advanced prompt
-   * - Trims to max context
-   * - Streams chunks back to renderer via IPC
-   */
-  ipcMain.handle('send-chat', async (event, messages, options = {}) => {
-    const messagesCopy = structuredCloneSafe(messages ?? []);
-    const config = loadConfig();
-    const settings = aiService.getProviderSettings(config);
-
-    if (!settings.apiKey && settings.provider !== 'local') {
-      return 'Error: No API key found.';
-    }
-
-    const manifest = getManifest();
-
-    // Ensure manifest covers disk files so prompt listing doesn’t miss entries
-    for (const category of PROVIDER_CATEGORIES) {
-      ensureManifestCoverage(manifest, category, getFiles(category));
-    }
-
-    // Extract recent text for relevance filtering
-    const recentText = messagesCopy.slice(-3).map(m => m.content || '').join(' ');
-
-    // Pass recentText to filter assets
-    const visualPrompt = buildVisualPrompt({ botImagesPath, botFilesPath }, manifest, options, recentText);
-
-    const characterState = readJsonSafe(characterStatePath, {});
-    const lorebook = readJsonSafe(lorebookPath, []);
-
-    const loreEmbeddingsPath = path.join(paths.userDataPath, 'aura_lorebook_embeddings.json');
-
-    const stateInjection = buildStateInjection(characterState, options?.activeCharacters);
-    const loreInjection = await buildLoreInjection(lorebook, messagesCopy, config, loreEmbeddingsPath);
-
-    const advancedPromptContent = readTextSafe(advancedPromptPath, '').trim();
-
-    const enforcementRules = buildEnforcementRules({
-      stateInjection,
-      loreInjection,
-      advancedPromptContent,
-    });
-
-    const systemSuffix = visualPrompt + enforcementRules;
-
-    // Trim history to context budget
-    const maxContext = Number(config.maxContext) || 128000;
-    const finalMessages = applyContextWindow(cleanMessagesForApi(messagesCopy), { maxContext, systemSuffix });
-
-    const webContents = event.sender;
-
-    try {
-      const temperature =
-        config.temperature !== undefined ? Number(config.temperature) : 0.7;
-
-      const fullText = await aiService.generateStream(
-        config,
-        finalMessages,
-        (chunk) => webContents.send('chat-reply-chunk', chunk),
-        { temperature }
-      );
-
-      return fullText || 'Error: No response from AI.';
-    } catch (error) {
-      console.error('API Error:', error?.message ?? error);
-      return `Error: ${error?.message ?? error}`;
-    }
+  registerAiHandlers({
+    ipcMain,
+    fs,
+    path,
+    aiService,
+    loadConfig,
+    readTextSafe,
+    readJsonSafe,
+    writeJsonSafe,
+    botFilesPath,
+    botImagesPath,
+    characterStatePath,
+    lorebookPath,
+    advancedPromptPath,
+    userDataPath: paths.userDataPath,
+    getManifest,
+    ensureManifestCoverage,
+    getFiles,
+    PROVIDER_CATEGORIES,
+    buildVisualPrompt,
+    buildStateInjection,
+    buildLoreInjection,
+    buildEnforcementRules,
+    applyContextWindow: contextWindow.applyContextWindow,
+    structuredCloneSafe,
+    trace,
   });
 };

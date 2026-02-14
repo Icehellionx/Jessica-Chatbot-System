@@ -17,13 +17,18 @@ import { getMood, getSceneContext, buildPayload } from './src/prompt-engine.js';
 
 const userInput = $('user-input');
 const sendBtn = $('send-btn');
+const stopBtn = $('stop-btn');
 const chatHistory = $('chat-history');
 
 /* --------------------------- ERROR HANDLING ------------------------------ */
 
 window.onerror = function(message, source, lineno, colno, error) {
   console.error('[Global Error]', error);
-  alert(`An error occurred:\n${message}`);
+  if (window.showErrorModal) window.showErrorModal(error, `An error occurred:\n${message}`);
+  else {
+    const f = window.formatApiError || ((err, d) => err?.message || d);
+    alert(f(error, `An error occurred:\n${message}`));
+  }
 };
 window.onunhandledrejection = function(event) {
   console.error('[Unhandled Rejection]', event.reason);
@@ -38,6 +43,160 @@ window.chatSummary = { content: '' };
 window.imageManifest = {}; // { backgrounds, sprites, splash, music }
 
 let turnCount = 0;
+let isGenerating = false;
+let latestBgRequestTime = 0;
+
+window.__directorDebug = window.__directorDebug || { enabled: false, events: [] };
+window.setDirectorDebug = function setDirectorDebug(enabled) {
+  window.__directorDebug.enabled = Boolean(enabled);
+  console.log(`[DirectorDebug] ${window.__directorDebug.enabled ? 'enabled' : 'disabled'}`);
+};
+window.getDirectorDebugEvents = function getDirectorDebugEvents() {
+  return [...(window.__directorDebug.events || [])];
+};
+window.clearDirectorDebugEvents = function clearDirectorDebugEvents() {
+  window.__directorDebug.events = [];
+};
+window.__pushDirectorDebugEvent = function __pushDirectorDebugEvent(type, payload = {}) {
+  const evt = { ts: new Date().toISOString(), type, ...payload };
+  const store = window.__directorDebug;
+  store.events.push(evt);
+  if (store.events.length > 300) store.events.shift();
+  if (store.enabled) console.log('[DirectorDebug]', evt);
+};
+
+const BG_DIAG_PANEL_ID = 'bg-diag-panel';
+const BG_DIAG_PRE_ID = 'bg-diag-panel-pre';
+let bgDiagTimer = null;
+
+function summarizeBgDiagnostics(events) {
+  const recent = events.slice(-120);
+  const count = (type) => recent.filter((e) => e.type === type).length;
+
+  const reasons = [];
+  if (count('bg-missing-generation-needed') === 0) {
+    reasons.push('No missing BG events detected. Director is likely resolving to existing backgrounds.');
+  }
+  if (count('bg-missing-generation-needed') > 0 && count('bg-generate-start') === 0) {
+    reasons.push('Missing BG detected, but generation did not start. Check handleMissingVisuals execution.');
+  }
+  if (count('bg-generate-start') > 0 && count('bg-generate-success') === 0) {
+    if (count('bg-fallback-used') + count('bg-fallback-used-after-error') > 0) {
+      reasons.push('Generation is failing upstream; fallback backgrounds are being used.');
+    } else if (count('bg-generate-error') + count('bg-generate-empty') > 0) {
+      reasons.push('Generation attempts are failing or returning empty results.');
+    } else {
+      reasons.push('Generation is in-flight or being discarded as stale.');
+    }
+  }
+  if (count('bg-generate-stale') > 0) {
+    reasons.push('Older generation requests are being discarded due to newer requests.');
+  }
+
+  if (reasons.length === 0) reasons.push('No obvious issue detected in recent events.');
+  return reasons;
+}
+
+function getBgDiagnosticsSnapshot() {
+  const events = window.getDirectorDebugEvents ? window.getDirectorDebugEvents() : [];
+  const recent = events.slice(-25);
+  const spinner = document.getElementById('vn-spinner');
+  const spinnerActive = Boolean(spinner && spinner.classList.contains('active'));
+  const currentBgStore = useStore.getState()?.currentBackground || '';
+  const currentBgDom = document.getElementById('vn-bg')?.getAttribute('src') || '';
+  const generatedInManifest = Object.keys(window.imageManifest?.backgrounds || {}).filter((k) => String(k).startsWith('backgrounds/generated/')).length;
+
+  return {
+    now: new Date().toISOString(),
+    spinnerActive,
+    currentBgStore,
+    currentBgDom,
+    generatedInManifest,
+    directorDebugEnabled: Boolean(window.__directorDebug?.enabled),
+    totalDebugEvents: events.length,
+    reasons: summarizeBgDiagnostics(events),
+    recentEvents: recent,
+  };
+}
+
+function renderBgDiagnosticsPanel() {
+  const pre = document.getElementById(BG_DIAG_PRE_ID);
+  if (!pre) return;
+  pre.textContent = JSON.stringify(getBgDiagnosticsSnapshot(), null, 2);
+}
+
+function ensureBgDiagnosticsPanel() {
+  let panel = document.getElementById(BG_DIAG_PANEL_ID);
+  if (panel) return panel;
+
+  panel = document.createElement('div');
+  panel.id = BG_DIAG_PANEL_ID;
+  panel.style.cssText = 'position:fixed; top:10px; left:10px; width:min(760px, calc(100vw - 20px)); max-height:85vh; background:rgba(0,0,0,0.92); color:#d5ffd5; border:1px solid #3b4; border-radius:8px; z-index:30000; display:none; box-shadow:0 10px 25px rgba(0,0,0,0.6); font-family:Consolas, Menlo, monospace;';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid #2a3;';
+  header.innerHTML = '<strong>Background Diagnostics (F10)</strong>';
+
+  const controls = document.createElement('div');
+  controls.style.cssText = 'display:flex; gap:8px;';
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.textContent = 'Refresh';
+  refreshBtn.style.cssText = 'cursor:pointer;';
+  refreshBtn.onclick = () => renderBgDiagnosticsPanel();
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear Events';
+  clearBtn.style.cssText = 'cursor:pointer;';
+  clearBtn.onclick = () => {
+    if (window.clearDirectorDebugEvents) window.clearDirectorDebugEvents();
+    renderBgDiagnosticsPanel();
+  };
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close';
+  closeBtn.style.cssText = 'cursor:pointer;';
+  closeBtn.onclick = () => toggleBgDiagnosticsPanel(false);
+
+  controls.appendChild(refreshBtn);
+  controls.appendChild(clearBtn);
+  controls.appendChild(closeBtn);
+  header.appendChild(controls);
+
+  const pre = document.createElement('pre');
+  pre.id = BG_DIAG_PRE_ID;
+  pre.style.cssText = 'margin:0; padding:10px; white-space:pre-wrap; overflow:auto; max-height:calc(85vh - 48px); font-size:12px;';
+
+  panel.appendChild(header);
+  panel.appendChild(pre);
+  document.body.appendChild(panel);
+  return panel;
+}
+
+function toggleBgDiagnosticsPanel(forceOpen) {
+  const panel = ensureBgDiagnosticsPanel();
+  const shouldOpen = forceOpen == null ? panel.style.display === 'none' : Boolean(forceOpen);
+  panel.style.display = shouldOpen ? 'block' : 'none';
+
+  if (shouldOpen) {
+    if (window.setDirectorDebug) window.setDirectorDebug(true);
+    renderBgDiagnosticsPanel();
+    if (bgDiagTimer) clearInterval(bgDiagTimer);
+    bgDiagTimer = setInterval(renderBgDiagnosticsPanel, 1000);
+  } else if (bgDiagTimer) {
+    clearInterval(bgDiagTimer);
+    bgDiagTimer = null;
+  }
+}
+
+function setGeneratingState(value) {
+  isGenerating = Boolean(value);
+  if (sendBtn) sendBtn.disabled = isGenerating;
+  if (stopBtn) {
+    stopBtn.style.display = isGenerating ? 'inline-block' : 'none';
+    stopBtn.disabled = !isGenerating;
+  }
+}
 
 /* --------------------------- FOCUS MANAGEMENT ---------------------------- */
 
@@ -63,7 +222,7 @@ function createMessageElement(role, rawText, index) {
 
   const contentDiv = document.createElement('div');
   contentDiv.className = 'message-content';
-  contentDiv.innerHTML = parseMarkdown(stripVisualTags(rawText));
+  contentDiv.innerHTML = parseMarkdown(window.stripVisualTags(rawText));
   msgDiv.appendChild(contentDiv);
 
   // Delete button (only when index is provided)
@@ -141,26 +300,248 @@ function appendSystemNotice(text) {
   appendMessage('system', text, undefined);
 }
 
+function pickFallbackBackgroundForRequest(requestedName) {
+  const bgs = window.imageManifest?.backgrounds ? Object.keys(window.imageManifest.backgrounds) : [];
+  if (!bgs.length) return null;
+
+  const normReq = normalizeText(String(requestedName || ''));
+  const tokens = normReq.split(/\s+/).filter(t => t.length > 2);
+
+  let best = null;
+  let bestScore = -1;
+  for (const bg of bgs) {
+    const base = bg.split(/[/\\]/).pop().split('.')[0];
+    const normBg = normalizeText(base);
+    let score = 0;
+
+    if (normReq && normBg.includes(normReq)) score += 10;
+    for (const t of tokens) if (normBg.includes(t)) score += 2;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = bg;
+    }
+  }
+
+  if (bestScore <= 0) {
+    const generic = bgs.find(bg => {
+      const n = bg.toLowerCase();
+      return n.includes('default') || n.includes('main') || n.includes('common') || n.includes('outside') || n.includes('living');
+    });
+    return generic || bgs[0];
+  }
+
+  return best;
+}
+
+const pendingBgGenerations = new Map();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isFatalImageGenError(err) {
+  const code = String(err?.code || '');
+  return code === 'IMAGE_GEN_AUTH_REQUIRED' ||
+    code === 'IMAGE_GEN_AUTH_INVALID' ||
+    code === 'IMAGE_GEN_UNSUPPORTED_TYPE';
+}
+
+async function continueBackgroundGenerationInBackground({ requested, expandedPrompt, requestTime, notice }) {
+  const key = `${requestTime}:${requested}`;
+  if (pendingBgGenerations.has(key)) return;
+  pendingBgGenerations.set(key, true);
+  window.__pushDirectorDebugEvent('bg-background-generation-started', { requested, requestTime });
+  if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('retrying', requested);
+
+  try {
+    const delaysMs = [1200, 2000, 3000, 4500, 6000, 8000];
+    for (let i = 0; i < delaysMs.length; i++) {
+      // If a newer BG request exists, stop trying this one.
+      if (latestBgRequestTime > requestTime) {
+        window.__pushDirectorDebugEvent('bg-background-generation-cancelled-superseded', { requested, requestTime });
+        return;
+      }
+
+      await sleep(delaysMs[i]);
+      window.__pushDirectorDebugEvent('bg-background-generation-attempt', { requested, attempt: i + 1 });
+      if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('retrying', `${requested} #${i + 1}`);
+
+      let newPath = null;
+      try {
+        newPath = await window.api.generateImage(expandedPrompt || requested, 'bg');
+      } catch (e) {
+        window.__pushDirectorDebugEvent('bg-background-generation-attempt-error', {
+          requested,
+          attempt: i + 1,
+          code: String(e?.code || ''),
+          error: String(e?.message || e),
+        });
+        if (isFatalImageGenError(e)) {
+          window.__pushDirectorDebugEvent('bg-background-generation-fatal', {
+            requested,
+            code: String(e?.code || ''),
+            error: String(e?.message || e),
+          });
+          if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('error', String(e?.message || 'image generation not configured'));
+          if (notice) notice.textContent = `⚠️ ${String(e?.message || 'Image generation unavailable')}`;
+          return;
+        }
+      }
+
+      if (!newPath) continue;
+      if (latestBgRequestTime > requestTime) {
+        window.__pushDirectorDebugEvent('bg-background-generation-late-stale', { requested, newPath });
+        return;
+      }
+
+      useStore.getState().setBackground(newPath);
+      await saveCurrentChatState();
+      window.__pushDirectorDebugEvent('bg-background-generation-success', { requested, newPath, attempt: i + 1 });
+      if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('ready', 'generated');
+      if (notice) {
+        notice.textContent = `✅ Background generated: "${newPath}"`;
+        setTimeout(() => { if (notice?.parentNode) notice.style.display = 'none'; }, 1800);
+      }
+      return;
+    }
+
+    window.__pushDirectorDebugEvent('bg-background-generation-exhausted', { requested });
+    if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('error', 'generation unavailable');
+    if (notice) {
+      notice.textContent = `⚠️ Still using fallback for "${requested}" (generation unavailable right now).`;
+    }
+  } finally {
+    pendingBgGenerations.delete(key);
+  }
+}
+
 
 /* ------------------------------ ASSET GENERATION ------------------------- */
 
 async function handleMissingVisuals(missing) {
   if (!missing || !missing.length) return;
+  window.__pushDirectorDebugEvent('missing-visuals', { missing });
   
   for (const m of missing) {
     if (m.type === 'bg') {
+      const requestTime = Date.now();
+      latestBgRequestTime = requestTime;
+      window.__pushDirectorDebugEvent('bg-generate-start', { requested: m.value, requestTime });
+      if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('generating', m.value);
       const notice = appendMessage('system', `🎨 Generating background: "${m.value}"...`, undefined);
+      if (window.setSpinner) window.setSpinner(true);
       try {
-        const newPath = await window.api.generateImage(m.value, 'bg');
+        // 1. Use Sidecar to expand the prompt for better results
+        const expandedPrompt = await window.api.expandImagePrompt(m.value);
+        console.log(`[Art Director] Expanded "${m.value}" -> "${expandedPrompt}"`);
+        window.__pushDirectorDebugEvent('bg-prompt-expanded', { requested: m.value, expandedPrompt });
+
+        // 2. Generate Image
+        const newPath = await window.api.generateImage(expandedPrompt || m.value, 'bg');
+
+        // If a newer BG request started while this one was generating, discard this result.
+        if (latestBgRequestTime > requestTime) {
+           console.log(`[Art Director] Discarding stale background result for "${m.value}"`);
+           window.__pushDirectorDebugEvent('bg-generate-stale', { requested: m.value, requestTime, newPath });
+           if (notice) notice.style.display = 'none';
+           continue;
+        }
+
         if (newPath) {
-           changeBackground(newPath);
+           useStore.getState().setBackground(newPath);
+           await saveCurrentChatState();
+           window.__pushDirectorDebugEvent('bg-generate-success', { requested: m.value, newPath });
+           if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('ready', 'generated');
            if (notice) notice.style.display = 'none'; // Hide notice on success
         } else {
-           if (notice) notice.textContent = `⚠️ Failed to generate background: "${m.value}" (Is SD running?)`;
+           window.__pushDirectorDebugEvent('bg-generate-empty', { requested: m.value });
+           const fallbackBg = pickFallbackBackgroundForRequest(m.value);
+           if (fallbackBg) {
+             useStore.getState().setBackground(fallbackBg);
+             await saveCurrentChatState();
+             window.__pushDirectorDebugEvent('bg-fallback-used', { requested: m.value, fallbackBg });
+             if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('fallback', m.value);
+             if (notice) notice.textContent = `⏳ Generating "${m.value}" in background. Temporary fallback: "${fallbackBg}"`;
+             // Keep trying in background and replace fallback once generated.
+             void continueBackgroundGenerationInBackground({
+               requested: m.value,
+               expandedPrompt,
+               requestTime,
+               notice,
+             });
+           } else if (notice) {
+             notice.textContent = `⚠️ Failed to generate background: "${m.value}" (no fallback available)`;
+           }
         }
       } catch (e) {
         console.error(e);
+        window.__pushDirectorDebugEvent('bg-generate-error', {
+          requested: m.value,
+          code: String(e?.code || ''),
+          error: String(e?.message || e),
+        });
+        const fallbackBg = pickFallbackBackgroundForRequest(m.value);
+        if (fallbackBg) {
+          useStore.getState().setBackground(fallbackBg);
+          await saveCurrentChatState();
+          window.__pushDirectorDebugEvent('bg-fallback-used-after-error', { requested: m.value, fallbackBg });
+          if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('fallback', m.value);
+          if (isFatalImageGenError(e)) {
+            if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('error', String(e?.message || 'generation unavailable'));
+            if (notice) notice.textContent = `⚠️ ${String(e?.message || 'Image generation unavailable')}. Using fallback: "${fallbackBg}"`;
+          } else {
+            if (notice) notice.textContent = `⏳ Generation retrying in background. Temporary fallback: "${fallbackBg}"`;
+            void continueBackgroundGenerationInBackground({
+              requested: m.value,
+              expandedPrompt: m.value,
+              requestTime,
+              notice,
+            });
+          }
+        } else if (notice) {
+          if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('error', 'no fallback');
+          notice.textContent = `⚠️ Failed to generate background: "${m.value}" (${String(e?.message || 'unknown error')})`;
+        }
+      } finally {
+        if (window.setSpinner) window.setSpinner(false);
       }
+    }
+    else if (m.type === 'sprite_smart_lookup') {
+      // The script asked for a sprite we don't have (e.g. "Jessica/Devastated").
+      // Instead of generating a new one (risky), ask Sidecar to pick the closest existing one (e.g. "Jessica/Crying.png").
+      try {
+        const charName = m.charName;
+        const allSprites = window.imageManifest?.sprites ? Object.keys(window.imageManifest.sprites) : [];
+        
+        // Filter to only this character's files
+        const charFiles = allSprites.filter(f => window.getCharacterName(f) === charName);
+        
+        if (charFiles.length > 0) {
+            const bestMatch = await window.api.findClosestSprite(m.value, charFiles);
+            
+            if (bestMatch && bestMatch !== 'none') {
+                console.log(`[Casting Director] Mapped "${m.value}" -> "${bestMatch}"`);
+                window.updateSprite(bestMatch);
+                useStore.getState().setCharacterVisibility(charName, true);
+                // Extract mood from filename for state
+                const mood = bestMatch.split(/[/\\]/).pop().split('.')[0].replace(new RegExp(`^${charName}[_-]`, 'i'), '');
+                useStore.getState().setCharacterEmotion(charName, mood || 'default');
+                await saveCurrentChatState();
+            } else {
+                const fallback = window.findBestSprite(charName, 'default');
+                if (fallback) {
+                  console.warn(`[Casting Director] No close match for "${m.value}". Falling back to default: "${fallback}"`);
+                  window.updateSprite(fallback);
+                  useStore.getState().setCharacterVisibility(charName, true);
+                  useStore.getState().setCharacterEmotion(charName, 'default');
+                  await saveCurrentChatState();
+                } else {
+                  console.warn(`[Casting Director] No good match found for "${m.value}" and no default sprite available for "${charName}"`);
+                }
+            }
+        }
+      } catch (e) { console.warn('Smart sprite lookup failed', e); }
     }
   }
 }
@@ -207,7 +588,7 @@ function showTitleScreenIfExists() {
       overlay.appendChild(text);
       document.body.appendChild(overlay);
 
-      playMusic('music/main_theme.mp3');
+      window.playMusic('music/main_theme.mp3');
 
       overlay.addEventListener('click', () => {
         overlay.style.opacity = '0';
@@ -322,6 +703,19 @@ const visualHandlers = {
       useStore.getState().setCharacterVisibility(charName, true);
       useStore.getState().setCharacterEmotion(charName, mood || 'default');
     }
+  },
+  onHide: (name) => {
+    const store = useStore.getState();
+    const lower = name.toLowerCase();
+    if (lower === 'all' || lower === 'everyone') {
+      Object.keys(store.characters).forEach(c => store.setCharacterVisibility(c, false));
+      window.hideSprite('all');
+    } else {
+      const keys = Object.keys(store.characters);
+      const target = keys.find(k => k.toLowerCase() === lower) || keys.find(k => lower.includes(k.toLowerCase()));
+      if (target) store.setCharacterVisibility(target, false);
+      window.hideSprite(name);
+    }
   }
 };
 
@@ -371,7 +765,7 @@ async function restoreChatState(state) {
   // NEW: Instead of manually manipulating the DOM, we just set the state in the store.
   // The subscribers we defined above will handle updating the UI automatically.
   
-  const { setBackground, setCharacterEmotion, setCharacterVisibility, setMusic, setSplash } = useStore.getState();
+  const { setBackground, setCharacterEmotion, setCharacterVisibility, setMusic, setSplash, characters } = useStore.getState();
 
   // Restore messages (this part still needs some manual sync with the store)
   window.messages = Array.isArray(state?.messages) ? state.messages : [];
@@ -379,7 +773,7 @@ async function restoreChatState(state) {
 
   let bgToLoad = null;
   if (state?.background) {
-    bgToLoad = validateImage(state.background, 'backgrounds');
+    bgToLoad = window.validateImage(state.background, 'backgrounds');
     console.log(`[DEBUG] Background '${state.background}' validated as:`, bgToLoad);
   }
   
@@ -394,13 +788,13 @@ async function restoreChatState(state) {
   if (bgToLoad) setBackground(bgToLoad);
 
   // Set character state from saved sprites
-  const allChars = Object.keys(window.botInfo.characters || {});
-  allChars.forEach(char => setCharacterVisibility(char, false)); // Hide all first
+  // Clear all characters currently in the store to handle case-sensitivity mismatches
+  Object.keys(characters).forEach(char => setCharacterVisibility(char, false));
   
   if (Array.isArray(state?.sprites)) {
     console.log('[DEBUG] Restoring Sprites List:', state.sprites);
     for (const filename of state.sprites) {
-        const charName = getCharacterName(filename);
+        const charName = window.getCharacterName(filename);
         // Robust mood extraction: remove character name prefix (case-insensitive) from filename
         const mood = filename.split('/').pop().split('.')[0].replace(new RegExp(`^${charName}[_-]`, 'i'), '');
         if (charName) {
@@ -467,7 +861,7 @@ function renderChat() {
   const lastMsg = window.messages[window.messages.length - 1];
   if (window.setDialogue) {
     if (lastMsg) {
-      window.setDialogue(parseMarkdown(stripVisualTags(lastMsg.content)), false);
+      window.setDialogue(parseMarkdown(window.stripVisualTags(lastMsg.content)), false);
     } else {
       window.setDialogue("", false);
     }
@@ -495,8 +889,14 @@ async function initializeChat() {
         window.__activeSprites.forEach(img => img.remove());
         window.__activeSprites.clear();
     }
-    hideSplash();
+    window.hideSplash();
     if (window.setDialogue) window.setDialogue(""); // Clear dialogue box
+
+    // Reset Store State for characters to ensure clean slate
+    const { setCharacterVisibility, setCharacterEmotion, characters, setSplash } = useStore.getState();
+    // Clear all characters currently in the store to handle case-sensitivity mismatches
+    Object.keys(characters).forEach(char => setCharacterVisibility(char, false));
+    setSplash(null); // Clear splash state so it doesn't persist in save
 
     let initialText =
       window.botInfo.initial ||
@@ -510,26 +910,54 @@ async function initializeChat() {
       const activeChars = getSceneContext(initialText);
 
       for (const charName of activeChars) {
-        const sprite = findBestSprite(charName, mood);
-        if (sprite) updateSprite(sprite);
+        const sprite = window.findBestSprite(charName, mood);
+        if (sprite) {
+          window.updateSprite(sprite);
+          setCharacterVisibility(charName, true);
+          setCharacterEmotion(charName, mood || 'default');
+        }
       }
 
       // Background heuristic: match by filename token
       const norm = normalizeText(initialText);
       const bgs = window.imageManifest?.backgrounds ? Object.keys(window.imageManifest.backgrounds) : [];
-      const bestBg = bgs.find(bg => {
+      
+      // 1. Try to find a background mentioned in the text
+      let bestBg = bgs.find(bg => {
         const name = bg.split(/[/\\]/).pop().split('.')[0].toLowerCase();
         return name.length > 2 && norm.includes(name);
       });
+
+      // 2. Fallback: Look for generic names
+      if (!bestBg) {
+        bestBg = bgs.find(bg => {
+          const lower = bg.toLowerCase();
+          return lower.includes('default') || lower.includes('main') || lower.includes('base') || lower.includes('common');
+        });
+      }
+
+      // 3. Fallback: Pick first available, but avoid character-specific backgrounds if that character isn't active
+      if (!bestBg && bgs.length > 0) {
+        const allCharNames = window.botInfo.characters ? Object.keys(window.botInfo.characters).map(c => c.toLowerCase()) : [];
+        const activeCharNamesLower = activeChars.map(c => c.toLowerCase());
+
+        // Find a background that does NOT contain the name of an inactive character
+        bestBg = bgs.find(bg => {
+          const lowerBg = bg.toLowerCase();
+          // Check if this background mentions any character that ISN'T currently active
+          const mentionsInactive = allCharNames.some(charName => 
+            !activeCharNamesLower.includes(charName) && lowerBg.includes(charName)
+          );
+          return !mentionsInactive;
+        });
+
+        // 4. Absolute last resort: just take the first one
+        if (!bestBg) bestBg = bgs[0];
+      }
       
       if (bestBg) {
-        changeBackground(bestBg);
+        window.changeBackground(bestBg);
         useStore.getState().setBackground(bestBg); // Sync store
-      } else if (bgs.length > 0) {
-        // Fallback: If no keyword match, just show the first background so it's not black
-        const defaultBg = bgs[0];
-        changeBackground(defaultBg);
-        useStore.getState().setBackground(defaultBg);
       }
     }
 
@@ -547,15 +975,15 @@ async function initializeChat() {
       let bestTrack = matchTrack(normInit) || matchTrack(normScenario) || tracks.find(t => t.toLowerCase().includes('default'));
 
       if (bestTrack) {
-        playMusic(bestTrack);
+        window.playMusic(bestTrack);
         useStore.getState().setMusic(bestTrack); // Sync store
       } else {
-        playMusic(null);
+        window.playMusic(null);
         useStore.getState().setMusic(null);
       }
     }
 
-    const { missing } = processVisualTags(initialText, { store: useStore.getState(), handlers: visualHandlers });
+    const { missing } = window.processVisualTags(initialText, { store: useStore.getState(), handlers: visualHandlers });
     if (missing?.length) await handleMissingVisuals(missing);
 
     updateThoughtsDropdown();
@@ -571,7 +999,11 @@ async function initializeChat() {
     await saveCurrentChatState();
   } catch (e) {
     console.error('Error initializing chat:', e);
-    alert('An error occurred while resetting the chat.');
+    if (window.showErrorModal) window.showErrorModal(e, 'An error occurred while resetting the chat.');
+    else {
+      const f = window.formatApiError || ((err, d) => err?.message || d);
+      alert(f(e, 'An error occurred while resetting the chat.'));
+    }
   } finally {
     overlay?.classList.remove('active');
     userInput.disabled = false;
@@ -587,19 +1019,11 @@ async function updateHistorySummary(isFullRewrite) {
     .map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  const promptMessages = isFullRewrite
-    ? [
-        { role: 'system', content: 'You are an expert storyteller. Summarize the entire story so far into a concise narrative, incorporating the previous summary and recent events.' },
-        { role: 'user', content: `Previous Summary:\n${window.chatSummary.content}\n\nRecent Events:\n${recentMessages}` },
-      ]
-    : [
-        { role: 'system', content: 'Summarize the following conversation events in 2-3 sentences to append to a history log.' },
-        { role: 'user', content: recentMessages },
-      ];
-
   try {
     appendSystemNotice('Updating history...');
-    const summaryUpdate = await window.api.sendChat(promptMessages);
+    
+    // Use the Sidecar (Local LLM) for summarization to save main model tokens
+    const summaryUpdate = await window.api.summarizeChat(recentMessages, isFullRewrite ? '' : window.chatSummary.content);
 
     if (isFullRewrite) window.chatSummary.content = summaryUpdate;
     else window.chatSummary.content += (window.chatSummary.content ? '\n\n' : '') + summaryUpdate;
@@ -640,7 +1064,7 @@ async function streamChat(payload, options) {
       }
       accumulated += chunk;
       
-      const parsed = parseMarkdown(stripVisualTags(accumulated));
+      const parsed = parseMarkdown(window.stripVisualTags(accumulated));
       contentDiv.innerHTML = parsed;
       if (window.setDialogue) window.setDialogue(parsed, true);
 
@@ -656,37 +1080,93 @@ async function streamChat(payload, options) {
     }
 
     // Execute visual tags first
-    const { stats, missing, report } = processVisualTags(fullResponse, { store: useStore.getState(), handlers: visualHandlers });
+    const { stats, missing, report } = window.processVisualTags(fullResponse, { store: useStore.getState(), handlers: visualHandlers });
     if (missing?.length) handleMissingVisuals(missing); // Async, don't await to keep UI responsive
 
 
-    // If no sprites were explicitly updated (either no tags or invalid tags),
-    // apply local mood heuristic to keep characters alive.
-    if (!stats.spriteUpdated) {
-      const activeSprites = window.__activeSprites || new Map();
-      const mood = getMood(fullResponse);
-      for (const charName of activeSprites.keys()) {
-        const sprite = findBestSprite(charName, mood);
-        if (sprite) updateSprite(sprite);
-      }
+    // Apply local mood heuristic to keep characters alive,
+    // but ONLY for characters that were NOT explicitly updated by tags.
+    const activeSprites = window.__activeSprites || new Map();
+    const mood = getMood(fullResponse);
+    for (const charName of activeSprites.keys()) {
+      if (stats.updatedCharNames && stats.updatedCharNames.has(charName)) continue;
+
+      const sprite = window.findBestSprite(charName, mood);
+      if (sprite) window.updateSprite(sprite);
     }
 
     updateThoughtsDropdown();
 
     // final render (tags stripped)
-    contentDiv.innerHTML = parseMarkdown(stripVisualTags(fullResponse));
+    contentDiv.innerHTML = parseMarkdown(window.stripVisualTags(fullResponse));
     if (window.setDialogue) window.setDialogue(contentDiv.innerHTML, false);
 
     if (window.voice) {
       window.voice.speak(fullResponse, options.activeCharacters);
     }
 
-    return { content: fullResponse.trim(), report };
+    return { content: fullResponse.trim(), report, cancelled: false };
+  } catch (error) {
+    const isCancelled = error?.code === 'AI_ABORTED';
+    if (isCancelled) {
+      const partial = String(accumulated || '').trim();
+      return { content: partial, report: null, cancelled: true };
+    }
+    throw error;
   } finally {
     if (removeListener) removeListener();
     // Ensure chat stays pinned
     chatHistory.scrollTop = chatHistory.scrollHeight;
   }
+}
+
+function hasVisualDirectives(text) {
+  return /\[(BG|SPRITE|SPLASH|MUSIC|HIDE|FX|SFX|CAMERA|TAKE|DROP|ADD_OBJECT):/i.test(String(text || ''));
+}
+
+function getRecentMessagesForDirector(messages, limit = 6) {
+  return (messages || [])
+    .slice(-limit)
+    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 500) }));
+}
+
+/**
+ * Deterministic Merge Layer
+ * Merges primary tags with sidecar tags based on priority rules.
+ * Rule: Primary wins for explicit conflicts. Sidecar fills gaps.
+ */
+function mergeDirectives(primaryContent, sidecarTags) {
+  if (!sidecarTags) return primaryContent;
+
+  const primaryHas = {
+    bg: /\[BG:/i.test(primaryContent),
+    music: /\[MUSIC:/i.test(primaryContent),
+    splash: /\[SPLASH:/i.test(primaryContent),
+    sprites: /\[SPRITE:/i.test(primaryContent)
+  };
+
+  const sidecarLines = sidecarTags.split('\n').map(l => l.trim()).filter(l => l);
+  const toAppend = [];
+
+  for (const line of sidecarLines) {
+    // 1. Background/Music/Splash: Only add if Primary is missing it
+    if (/\[BG:/i.test(line) && !primaryHas.bg) toAppend.push(line);
+    else if (/\[MUSIC:/i.test(line) && !primaryHas.music) toAppend.push(line);
+    else if (/\[SPLASH:/i.test(line) && !primaryHas.splash) toAppend.push(line);
+    
+    // 2. Sprites: Complex merge
+    // If Primary has NO sprites, accept all Sidecar sprites.
+    // If Primary HAS sprites, we generally trust it knows who is there. 
+    // (Advanced: check if Sidecar adds a character NOT in Primary. For now, safe merge = don't touch if Primary acted).
+    else if (/\[SPRITE:/i.test(line) && !primaryHas.sprites) toAppend.push(line);
+    
+    // 3. FX/SFX/Camera: Always allow Sidecar to enhance (additive)
+    else if (/\[(FX|SFX|CAMERA):/i.test(line)) toAppend.push(line);
+  }
+
+  if (toAppend.length === 0) return primaryContent;
+
+  return primaryContent + `\n[SCENE]${toAppend.join(' ')}[/SCENE]`;
 }
 
 /* ------------------------------ SEND / REROLL ---------------------------- */
@@ -709,16 +1189,145 @@ async function handleSend() {
   const sceneCharacters = getSceneContext(text);
   const { inventory, sceneObjects } = useStore.getState();
 
+  // --- Sidecar: Context Optimization (The Librarian) ---
+  // Gather candidates for context drawers
+  let activeContextKeys = [];
+  try {
+    const lore = await window.api.getLorebook() || [];
+    const loreKeys = lore.map(e => `Lore: ${e.entry.slice(0, 20)}...`);
+    
+    // If we have a lot of lore, ask Sidecar to filter it
+    if (loreKeys.length > 5) {
+        const relevant = await window.api.determineActiveContext(window.messages, loreKeys);
+        if (relevant && relevant.length > 0) {
+            console.log('[Librarian] Opening drawers:', relevant);
+            // Map back to full entries (simplified logic for demo)
+            // In a full implementation, you'd pass IDs or exact keys
+            activeContextKeys = relevant;
+        }
+    }
+  } catch (e) { console.warn('[Librarian] Failed:', e); }
+
+
   const payload = buildPayload(sceneCharacters);
+  setGeneratingState(true);
 
   try {
-    const { content, report } = await streamChat(payload, {
+    const { content, report, cancelled } = await streamChat(payload, {
       activeCharacters: sceneCharacters,
       inventory: inventory,
       sceneObjects: sceneObjects,
+      activeContextKeys: activeContextKeys // Pass the filtered keys to the backend
     });
 
-    window.messages.push({ role: 'assistant', content, renderReport: report });
+    if (content) {
+      let finalContent = content;
+
+      // --- Sidecar: The Editor ---
+      // If the content looks suspicious (contains brackets), ask the sidecar to clean it.
+      if (!cancelled && /[\[\]]/.test(finalContent)) {
+          try {
+             const cleaned = await window.api.cleanupResponse(finalContent);
+             if (cleaned && cleaned !== finalContent) {
+                 console.log('[Editor] Cleaned artifacts:', finalContent, '->', cleaned);
+                 finalContent = cleaned;
+             }
+          } catch (e) { console.warn('[Editor] Cleanup failed:', e); }
+      }
+
+      window.messages.push({ role: 'assistant', content: finalContent, renderReport: report });
+    } else if (!cancelled) {
+      window.messages.push({ role: 'assistant', content: '', renderReport: report });
+    }
+
+    // --- Sidecar: Director Mode Logic ---
+    const config = await window.api.getConfig();
+    const directorMode = config.directorMode || 'fallback';
+
+    const shouldRunDirector = (directorMode === 'always') || (directorMode === 'fallback' && !hasVisualDirectives(content));
+
+    if (content && shouldRunDirector && !cancelled && directorMode !== 'off') {
+        const activeNames = window.getActiveSpriteNames ? window.getActiveSpriteNames() : [];
+        const currentState = useStore.getState();
+        const tags = await window.api.getStageDirections(content, activeNames, {
+            recentMessages: getRecentMessagesForDirector(window.messages),
+            currentBackground: currentState.currentBackground || '',
+            currentMusic: currentState.currentMusic || '',
+            inventory: currentState.inventory || [],
+            sceneObjects: currentState.sceneObjects || [],
+            lastRenderReport: report || '',
+        });
+
+        if (tags && hasVisualDirectives(tags)) {
+            console.log('[Director] Suggested tags:', tags);
+            
+            // MERGE: Combine original content with new tags safely
+            const mergedContent = mergeDirectives(content, tags);
+            
+            // 1. Apply visual changes immediately (using the diff)
+            const { missing } = window.processVisualTags(mergedContent, { store: useStore.getState(), handlers: visualHandlers });
+            if (missing?.length) handleMissingVisuals(missing);
+            
+            // 2. Update history with the merged version
+            window.messages[window.messages.length - 1].content = mergedContent;
+        }
+    }
+
+    // --- Sidecar: Game State (Quest & Affinity) ---
+    // Run this in background to update UI without blocking
+    if (!cancelled && turnCount % 2 === 0) { // Update every 2 turns
+        (async () => {
+            try {
+                // 1. Update Objective
+                const objective = await window.api.getQuestObjective(window.messages);
+                const objEl = document.getElementById('hud-objective');
+                if (objEl) objEl.textContent = `Objective: ${objective}`;
+
+                // 2. Update Affinity (for primary character)
+                const activeNames = window.getActiveSpriteNames ? window.getActiveSpriteNames() : [];
+                if (activeNames.length > 0) {
+                    const affinity = await window.api.getAffinity(window.messages, activeNames[0]);
+                    const affEl = document.getElementById('hud-affinity');
+                    if (affEl && affinity) affEl.textContent = `Affinity: ${affinity.status} (${affinity.score}%)`;
+                }
+            } catch (e) { console.warn('Game state update failed', e); }
+        })();
+
+        // --- Sidecar: The Profiler (AURA Memory) ---
+        // Every 4 turns, check for new facts and add to Lorebook
+        if (turnCount % 4 === 0) {
+            (async () => {
+                try {
+                    const newEntries = await window.api.extractUserFacts(window.messages);
+                    if (newEntries && newEntries.length > 0) {
+                        console.log('[Profiler] Discovered facts:', newEntries);
+                        
+                        const currentLore = await window.api.getLorebook() || [];
+                        let added = false;
+
+                        for (const item of newEntries) {
+                            // Simple duplicate check to prevent spamming the lorebook
+                            const exists = currentLore.some(e => e.entry === item.entry);
+                            if (!exists && item.entry && item.keywords) {
+                                currentLore.push({
+                                    entry: item.entry,
+                                    keywords: item.keywords,
+                                    scenario: 'User Memory' // Tag for organization
+                                });
+                                added = true;
+                            }
+                        }
+
+                        if (added) {
+                            await window.api.saveLorebook(currentLore);
+                            if (window.showToast) window.showToast(`🧠 Memory Updated: ${newEntries.length} new fact(s)`);
+                        }
+                    }
+                } catch (e) { console.warn('[Profiler] Failed:', e); }
+            })();
+        }
+    }
+
     await saveCurrentChatState();
     
     // Re-render to ensure the new message gets its buttons (Delete, Branch, etc.)
@@ -726,7 +1335,11 @@ async function handleSend() {
 
     // Character evolution: Run AFTER the turn is secure to avoid race conditions
     if (turnCount > 0 && turnCount % 5 === 0) {
-      window.api.evolveCharacterState(window.messages, sceneCharacters).catch(e => console.warn('Evolution skipped:', e));
+      window.api.evolveCharacterState(window.messages, sceneCharacters)
+        .then(updates => {
+            if (updates) console.log('[Character Evolution] State updated:', updates);
+        })
+        .catch(e => console.warn('Evolution skipped:', e));
     }
 
     // Auto-summary
@@ -747,7 +1360,13 @@ async function handleSend() {
 
     // Restore input
     userInput.value = text;
-    alert(`Failed to send message: ${error?.message || 'Unknown error'}`);
+    if (window.showErrorModal) window.showErrorModal(error, 'Failed to send message.');
+    else {
+      const f = window.formatApiError || ((err, d) => err?.message || d);
+      alert(f(error, 'Failed to send message.'));
+    }
+  } finally {
+    setGeneratingState(false);
   }
 
   window.refocusInput();
@@ -765,7 +1384,7 @@ async function swapMessageVersion(msgIndex, swipeIndex) {
   renderChat();
   
   // Process visuals for the swapped message (so background/sprites update to match)
-  const { missing } = processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
+  const { missing } = window.processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
   if (missing?.length) handleMissingVisuals(missing);
   
   await saveCurrentChatState();
@@ -790,7 +1409,7 @@ async function deleteSwipe(msgIndex) {
   renderChat();
   
   // Update visuals for the new current swipe
-  const { missing } = processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
+  const { missing } = window.processVisualTags(msg.content, { store: useStore.getState(), handlers: visualHandlers });
   if (missing?.length) handleMissingVisuals(missing);
 
   await saveCurrentChatState();
@@ -852,7 +1471,11 @@ async function regenerateResponse({ replace } = { replace: false }) {
     await saveCurrentChatState();
   } catch (error) {
     console.error('Regenerate Error:', error);
-    alert(`Failed to regenerate response: ${error?.message || 'Unknown error'}`);
+    if (window.showErrorModal) window.showErrorModal(error, 'Failed to regenerate response.');
+    else {
+      const f = window.formatApiError || ((err, d) => err?.message || d);
+      alert(f(error, 'Failed to regenerate response.'));
+    }
   } finally {
     window.refocusInput();
   }
@@ -861,6 +1484,16 @@ async function regenerateResponse({ replace } = { replace: false }) {
 /* ------------------------------ EVENTS ----------------------------------- */
 
 sendBtn.addEventListener('click', handleSend);
+if (stopBtn) {
+  stopBtn.addEventListener('click', async () => {
+    if (!isGenerating) return;
+    try {
+      await window.api.cancelChat();
+    } catch (e) {
+      console.warn('Cancel failed:', e);
+    }
+  });
+}
 
 userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -869,15 +1502,24 @@ userInput.addEventListener('keydown', (e) => {
   }
 });
 
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F10') {
+    e.preventDefault();
+    toggleBgDiagnosticsPanel();
+  }
+});
+
 /* ------------------------------ INIT ------------------------------------- */
 
 async function init() {
-  setupVisuals();
+  window.setupVisuals();
   setupStateSubscribers(); // <-- Add this line
-  setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse, swapMessageVersion });
+  window.setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse, swapMessageVersion });
+  if (window.setupHUD) window.setupHUD(); // Ensure HUD is created
+  if (window.setBackgroundGenerationStatus) window.setBackgroundGenerationStatus('idle');
   if (window.setupSettingsUI) window.setupSettingsUI({ initializeChat });
 
-  setupVolumeControls();
+  window.setupVolumeControls();
 
   // Loading overlay
   const loadingOverlay = document.createElement('div');
@@ -885,7 +1527,7 @@ async function init() {
   loadingOverlay.innerHTML = '<div>Resetting Story...</div>';
   document.body.appendChild(loadingOverlay);
 
-  preloadImages();
+  window.preloadImages();
 
   // Load config + assets/state
   const config = await window.api.getConfig();

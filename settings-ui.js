@@ -1,5 +1,5 @@
-/* ============================================================================
-   settings-ui.js — Settings, API Keys, and Configuration UI
+﻿/* ============================================================================
+   settings-ui.js â€” Settings, API Keys, and Configuration UI
    ========================================================================== */
 
 (function () {
@@ -28,7 +28,7 @@
 
   function maskKey(key) {
     const s = String(key || "");
-    if (s.length <= 8) return "••••••••";
+    if (s.length <= 8) return "********";
     return `${s.slice(0, 4)}...${s.slice(-4)}`;
   }
 
@@ -37,6 +37,12 @@
   // ---------------------------
   window.setupSettingsUI = function setupSettingsUI(callbacks) {
     const { initializeChat } = callbacks;
+    let providerHealth = {
+      status: "unknown", // unknown | ok | fail
+      latencyMs: null,
+      message: "Not tested yet",
+      provider: null
+    };
 
     const setupModal = $("setup-modal");
     const optionsModal = $("options-modal");
@@ -119,14 +125,24 @@
       // Load Advanced Settings
       const prompt = await window.api.getAdvancedPrompt();
       const config = await window.api.getConfig();
+      providerHealth.provider = config?.activeProvider || null;
+      renderProviderHealth(config);
 
       const temp = config?.temperature !== undefined ? config.temperature : 0.7;
       const maxCtx = config?.maxContext || 128000;
+      const dirMode = config?.directorMode || 'fallback';
+      const hasPollinationsKey = Boolean(config?.hasPollinationsApiKey);
 
       $("advanced-prompt-content").value = prompt || "";
       $("advanced-temperature").value = temp;
       $("temp-display").textContent = String(temp);
       $("max-context").value = maxCtx;
+      
+      if ($("director-mode")) $("director-mode").value = dirMode;
+      if ($("pollinations-key")) $("pollinations-key").value = "";
+      if ($("pollinations-key-status")) {
+        $("pollinations-key-status").textContent = hasPollinationsKey ? "Configured (hidden)" : "Not configured (recommended for reliability)";
+      }
 
       // Token meter (estimate)
       const currentTokens = window.estimateTokenCount ? window.estimateTokenCount(prompt || "") : 0;
@@ -165,8 +181,30 @@
       btn.disabled = true;
 
       try {
+        const startedAt = performance.now();
         const result = await window.api.testProvider();
+        const elapsed = Math.round(performance.now() - startedAt);
+        providerHealth = {
+          status: result?.success ? "ok" : "fail",
+          latencyMs: elapsed,
+          message: result?.message || (result?.success ? "Connection OK" : "Connection failed"),
+          provider: (await window.api.getConfig())?.activeProvider || null
+        };
+        renderProviderHealth(await window.api.getConfig());
         alert(result?.message || "No response.");
+      } catch (e) {
+        providerHealth = {
+          status: "fail",
+          latencyMs: null,
+          message: e?.message || "Test failed",
+          provider: (await window.api.getConfig())?.activeProvider || null
+        };
+        renderProviderHealth(await window.api.getConfig());
+        if (window.showErrorModal) window.showErrorModal(e, "Test failed.");
+        else {
+          const f = window.formatApiError || ((err, d) => err?.message || d);
+          alert(f(e, "Test failed."));
+        }
       } finally {
         btn.textContent = original;
         btn.disabled = false;
@@ -183,10 +221,45 @@
       try {
         const result = await window.api.scanImages();
         alert(result?.message || "Scan complete.");
+      } catch (e) {
+        if (window.showErrorModal) window.showErrorModal(e, "Scan failed.");
+        else {
+          const f = window.formatApiError || ((err, d) => err?.message || d);
+          alert(f(e, "Scan failed."));
+        }
       } finally {
         btn.textContent = original;
         btn.disabled = false;
       }
+    });
+
+    $("save-pollinations-key-btn")?.addEventListener("click", async () => {
+      const key = ($("pollinations-key")?.value || "").trim();
+      if (!key) return alert("Enter a Pollinations key or use Clear.");
+      await window.api.savePollinationsKey(key);
+      $("pollinations-key").value = "";
+      if ($("pollinations-key-status")) $("pollinations-key-status").textContent = "Configured (hidden)";
+      alert("Pollinations image key saved.");
+    });
+
+    $("open-pollinations-key-help-btn")?.addEventListener("click", async () => {
+      const keyHelpUrl = "https://pollinations.ai";
+      try {
+        if (window.api?.openExternalUrl) {
+          await window.api.openExternalUrl(keyHelpUrl);
+        } else {
+          window.open(keyHelpUrl, "_blank", "noopener,noreferrer");
+        }
+      } catch {
+        window.open(keyHelpUrl, "_blank", "noopener,noreferrer");
+      }
+    });
+
+    $("clear-pollinations-key-btn")?.addEventListener("click", async () => {
+      await window.api.savePollinationsKey("");
+      if ($("pollinations-key")) $("pollinations-key").value = "";
+      if ($("pollinations-key-status")) $("pollinations-key-status").textContent = "Not configured (recommended for reliability)";
+      alert("Pollinations image key cleared.");
     });
 
     // Temperature display live
@@ -220,9 +293,11 @@
       const prompt = ($("advanced-prompt-content").value || "").trim();
       const temp = $("advanced-temperature").value;
       const maxCtx = $("max-context").value;
+      const dirMode = $("director-mode")?.value || 'fallback';
 
       await window.api.saveTemperature(temp);
       await window.api.saveMaxContext(maxCtx);
+      await window.api.saveDirectorMode(dirMode);
       await window.api.saveAdvancedPrompt(prompt);
 
       alert("Advanced settings saved!");
@@ -291,6 +366,45 @@
       hide(voiceModal);
       alert("Voice map saved.");
     });
+
+    function renderProviderHealth(config) {
+      const modalContent = optionsModal?.querySelector(".modal-content");
+      if (!modalContent) return;
+
+      let el = $("provider-health");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "provider-health";
+        el.className = "form-group";
+        const divider = modalContent.querySelector(".divider");
+        if (divider?.parentNode) divider.parentNode.insertBefore(el, divider);
+        else modalContent.insertBefore(el, modalContent.firstChild);
+      }
+
+      const active = config?.activeProvider || "none";
+      const badgeColor =
+        providerHealth.status === "ok" ? "#2ea043" :
+        providerHealth.status === "fail" ? "#d1242f" : "#6b7280";
+      const latency = Number.isFinite(providerHealth.latencyMs) ? `${providerHealth.latencyMs} ms` : "n/a";
+      const lastMsg = providerHealth.message || "Not tested yet";
+
+      el.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div>
+            <div style="font-size:12px; color:#aaa;">Provider Health</div>
+            <div style="font-size:14px;">
+              Active: <strong>${escapeHtml(active)}</strong>
+            </div>
+            <div style="font-size:12px; color:#bcbcbc; margin-top:4px;">
+              ${escapeHtml(lastMsg)} | Latency: ${escapeHtml(latency)}
+            </div>
+          </div>
+          <span style="display:inline-block; min-width:70px; text-align:center; padding:4px 8px; border-radius:999px; background:${badgeColor}; color:#fff; font-size:11px; text-transform:uppercase;">
+            ${providerHealth.status}
+          </span>
+        </div>
+      `;
+    }
 
     // ---------------------------
     // Keys List Logic
@@ -391,3 +505,5 @@
     }
   };
 })();
+
+

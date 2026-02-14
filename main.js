@@ -37,7 +37,7 @@ function ensureRequiredDirs(paths) {
   ensureDir(path.join(paths.botFilesPath, 'characters'));
 
   // Media folders (served via bot-resource)
-  const mediaDirs = ['backgrounds', 'sprites', 'splash', 'music', 'title', 'characters'];
+  const mediaDirs = ['backgrounds', 'sprites', 'splash', 'music', 'sfx', 'title', 'characters'];
   for (const d of mediaDirs) ensureDir(path.join(paths.botImagesPath, d));
 }
 
@@ -50,7 +50,6 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       standard: true,
       supportFetchAPI: true,
-      bypassCSP: true,
     },
   },
 ]);
@@ -87,7 +86,7 @@ function registerBotResourceProtocol(paths) {
   const cache = new Map(); // requestedRel -> resolved absolute
 
   const tryExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp3', '.wav', '.ogg'];
-  const subdirs = ['characters', 'sprites', 'backgrounds', 'splash', 'music', 'title'];
+  const subdirs = ['characters', 'sprites', 'backgrounds', 'splash', 'music', 'sfx', 'title'];
 
   protocol.registerFileProtocol('bot-resource', (request, callback) => {
     try {

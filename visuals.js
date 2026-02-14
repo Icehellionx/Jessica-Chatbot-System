@@ -33,7 +33,7 @@
   // State
   // ---------------------------
 
-  window.imageManifest = window.imageManifest || { backgrounds: {}, sprites: {}, splash: {}, music: {} };
+  window.imageManifest = window.imageManifest || { backgrounds: {}, sprites: {}, splash: {}, music: {}, sfx: {} };
 
   // Character-specific sprite scaling/positioning tweaks
   let spriteOverrides = {};
@@ -45,6 +45,7 @@
 
   let debugMode = false;
   const debugLog = [];
+  let currentBgRequest = null;
 
   /** Map<charIdLower, HTMLImageElement> */
   const activeSprites = new Map();
@@ -66,7 +67,7 @@
     if (now - cacheStamp < CACHE_TTL_MS) return;
 
     cacheStamp = now;
-    (["backgrounds", "sprites", "splash", "music"]).forEach((type) => {
+    (["backgrounds", "sprites", "splash", "music", "sfx"]).forEach((type) => {
       const obj = window.imageManifest?.[type] || {};
       const keys = Object.keys(obj);
       manifestKeyCache[type] = keys.map((k) => ({
@@ -140,7 +141,31 @@
   // ---------------------------
 
   function setupVisuals() {
-    // CSS is now loaded via styles.css
+    // Inject spinner styles dynamically
+    if (!document.getElementById('vn-spinner-style')) {
+      const style = document.createElement('style');
+      style.id = 'vn-spinner-style';
+      style.textContent = `
+        #vn-spinner {
+          position: absolute;
+          bottom: 20px;
+          right: 20px;
+          width: 30px;
+          height: 30px;
+          border: 4px solid rgba(255, 255, 255, 0.2);
+          border-radius: 50%;
+          border-top-color: #fff;
+          animation: vn-spin 1s linear infinite;
+          opacity: 0;
+          transition: opacity 0.3s;
+          pointer-events: none;
+          z-index: 200;
+        }
+        #vn-spinner.active { opacity: 1; }
+        @keyframes vn-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      `;
+      document.head.appendChild(style);
+    }
   }
 
   // ---------------------------
@@ -354,18 +379,54 @@
     const bg = $("vn-bg");
     if (!bg) return;
 
+    setSpinner(true);
+
     const newSrc = `bot-resource://${filename}`;
-    if (bg.src === newSrc) return;
+    
+    // Avoid reloading if it's already the current background
+    if (bg.src === newSrc) {
+      setSpinner(false);
+      return;
+    }
 
-    const overlay = document.createElement("img");
-    overlay.className = "bg-overlay";
-    overlay.src = bg.src || "";
-    bg.parentNode?.insertBefore(overlay, bg.nextSibling);
+    // Track the latest request to prevent race conditions if images load out of order
+    currentBgRequest = newSrc;
 
-    bg.src = newSrc;
+    // Preload the image
+    const img = new Image();
+    img.src = newSrc;
 
-    requestAnimationFrame(() => (overlay.style.opacity = "0"));
-    setTimeout(() => overlay.remove(), 1000);
+    img.onload = () => {
+      // If a newer request was made while this was loading, discard this one
+      if (currentBgRequest !== newSrc) return;
+
+      setSpinner(false);
+
+      // If there is an existing background, crossfade using an overlay
+      if (bg.getAttribute('src')) {
+        const overlay = document.createElement("img");
+        overlay.className = "bg-overlay";
+        overlay.src = bg.src;
+        overlay.style.transition = "opacity 1s ease";
+        bg.parentNode?.insertBefore(overlay, bg.nextSibling);
+
+        bg.src = newSrc;
+
+        requestAnimationFrame(() => (overlay.style.opacity = "0"));
+        setTimeout(() => overlay.remove(), 1000);
+      } else {
+        // First load: Fade in the background element itself
+        bg.style.opacity = "0";
+        bg.style.transition = "opacity 1s ease";
+        bg.src = newSrc;
+        requestAnimationFrame(() => (bg.style.opacity = "1"));
+      }
+    };
+
+    img.onerror = (e) => {
+      console.error(`[Visuals] Failed to load background: ${filename}`, e);
+      if (currentBgRequest === newSrc) setSpinner(false);
+    };
   }
 
   function showSplash(filename) {
@@ -632,6 +693,19 @@
     }
   }
 
+  function setSpinner(active) {
+    let spinner = $("vn-spinner");
+    if (!spinner) {
+      const panel = $("vn-panel");
+      if (!panel) return;
+      spinner = document.createElement("div");
+      spinner.id = "vn-spinner";
+      panel.appendChild(spinner);
+    }
+    if (active) spinner.classList.add("active");
+    else spinner.classList.remove("active");
+  }
+
   // ---------------------------
   // FX
   // ---------------------------
@@ -680,32 +754,60 @@
     if (!text) return "";
     let out = String(text);
 
+    // Remove entire SCENE block (Channel 1: Directives) so only Story (Channel 2) remains
+    out = out.replace(/\[SCENE\][\s\S]*?\[\/SCENE\]/gi, "");
+
     // Use fresh regexes, now that TAG_PATTERNS is more complex
     out = Object.values(TAG_PATTERNS).reduce(
         (acc, regex) => acc.replace(new RegExp(regex.source, "gi"), ""),
         out
     );
 
+    // Generic catch-all for hallucinated tags (e.g. [SCENE_STATE: ...])
+    out = out.replace(/\[[A-Z_]+:[^\]]*\]/g, "");
+
     return out.replace(/\n{3,}/g, "\n\n").trim();
   }
 
   function processVisualTags(text, options = {}) {
-    const input = String(text || "");
+    const rawText = String(text || "");
+    let processingText = rawText;
+
+    // STRICT PARSER CONTRACT:
+    // If a [SCENE] block exists, we ONLY process tags inside it.
+    // This prevents the AI from "roleplaying" tags inside dialogue.
+    const sceneMatch = rawText.match(/\[SCENE\]([\s\S]*?)\[\/SCENE\]/i);
+    if (sceneMatch) {
+        processingText = sceneMatch[1];
+    }
+
     const { store, handlers } = options;
     const matches = [];
     const missing = [];
+    const executed = []; // Track what actually happened
     let spriteUpdated = false;
+    const updatedCharNames = new Set();
+
+    // Directive Caps (per analysis recommendation)
+    const caps = {
+        bg: 1,
+        music: 1,
+        splash: 1,
+        fx: 1,
+        sprite: 2
+    };
+    const counts = { bg: 0, music: 0, splash: 0, fx: 0, sprite: 0 };
 
     const collect = (type) => {
       if (type === 'camera') {
         const re = new RegExp(TAG_PATTERNS.camera.source, "gi");
-        for (const m of input.matchAll(re)) {
+        for (const m of processingText.matchAll(re)) {
           matches.push({ type, value: (m[1] || "").trim(), target: (m[2] || "").trim(), index: m.index ?? 0 });
         }
         return;
       }
       const re = new RegExp(TAG_PATTERNS[type].source, "gi");
-      for (const m of input.matchAll(re)) {
+      for (const m of processingText.matchAll(re)) {
         matches.push({ type, value: (m[1] || "").trim(), index: m.index ?? 0 });
       }
     };
@@ -727,28 +829,71 @@
 
       switch (m.type) {
         case "bg": {
+            if (counts.bg >= caps.bg) break;
+            counts.bg++;
             const valid = validateImage(cleanedValue, "backgrounds");
-            if (valid && handlers?.onBg) handlers.onBg(valid);
-            else if (valid) changeBackground(valid);
-            else missing.push({ type: 'bg', value: cleanedValue });
+            if (valid) {
+                if (window.__pushDirectorDebugEvent) {
+                  window.__pushDirectorDebugEvent('bg-resolved-existing', { requested: cleanedValue, resolved: valid });
+                }
+                if (handlers?.onBg) handlers.onBg(valid);
+                else changeBackground(valid);
+                executed.push(`BG: ${valid}`);
+            }
+            else {
+                if (window.__pushDirectorDebugEvent) {
+                  window.__pushDirectorDebugEvent('bg-missing-generation-needed', { requested: cleanedValue });
+                }
+                missing.push({ type: 'bg', value: cleanedValue });
+            }
             break;
         }
         case "sprite": {
+            if (counts.sprite >= caps.sprite) break;
+            counts.sprite++;
             let valid = validateImage(cleanedValue, "sprites");
-            if (!valid) {
-                const best = findBestSprite(getCharacterName(cleanedValue), "default");
-                if (best) valid = best;
+            const charName = getCharacterName(cleanedValue);
+            const requestedMood = cleanedValue.includes('/')
+              ? cleanedValue.split('/').pop()
+              : 'default';
+
+            // More permissive matching:
+            // If exact/fuzzy validate fails, try best-fit mood for that character.
+            if (!valid && charName) {
+                valid = findBestSprite(charName, requestedMood);
             }
+
+            // Hard fallback:
+            // If we still can't find a specific mood, force default for on-stage character.
+            if (!valid && charName) {
+                valid = findBestSprite(charName, 'default');
+            }
+
             if (valid) {
                 if (handlers?.onSprite) handlers.onSprite(valid);
                 else updateSprite(valid);
                 spriteUpdated = true;
+                updatedCharNames.add(getCharacterName(valid));
+                executed.push(`Sprite: ${valid}`);
+            }
+            else {
+                // If exact/fuzzy match failed, mark for Smart Lookup via Sidecar
+                if (charName) {
+                    missing.push({ 
+                        type: 'sprite_smart_lookup', 
+                        value: cleanedValue, // e.g. "Jessica/Devastated"
+                        charName: charName 
+                    });
+                }
             }
             break;
         }
         case "splash": {
+            if (counts.splash >= caps.splash) break;
+            counts.splash++;
             const valid = validateImage(cleanedValue, "splash");
             if (valid) {
+                executed.push(`Splash: ${valid}`);
                 if (handlers?.onSplash) handlers.onSplash(valid);
                 else showSplash(valid);
             } else {
@@ -759,27 +904,39 @@
             break;
         }
         case "music": {
+            if (counts.music >= caps.music) break;
+            counts.music++;
             if (cleanedValue.toLowerCase() === "stop") {
                 if (handlers?.onMusic) handlers.onMusic(null); else playMusic(null);
             } else {
                 const valid = validateImage(cleanedValue, "music");
-                if (valid && handlers?.onMusic) handlers.onMusic(valid); else if (valid) playMusic(valid);
+                if (valid) {
+                    executed.push(`Music: ${valid}`);
+                    if (handlers?.onMusic) handlers.onMusic(valid); else playMusic(valid);
+                }
             }
             break;
         }
         case "hide":
-            hideSprite(cleanedValue);
+            executed.push(`Hide: ${cleanedValue}`);
+            if (handlers?.onHide) handlers.onHide(cleanedValue);
+            else hideSprite(cleanedValue);
             break;
         case "fx":
+            if (counts.fx >= caps.fx) break;
+            counts.fx++;
+            executed.push(`FX: ${cleanedValue}`);
             triggerEffect(cleanedValue);
             break;
         case "sfx":
+            executed.push(`SFX: ${cleanedValue}`);
             if (window.playSfx) window.playSfx(cleanedValue);
             break;
         case "camera": {
             const action = cleanedValue.toLowerCase();
             const targetName = m.target.toLowerCase();
             if (action === 'zoom_in') {
+                executed.push(`Camera: Zoom ${targetName}`);
                 const spriteImg = activeSprites.get(targetName);
                 if (spriteImg) spriteImg.classList.add('camera-zoom-in');
             }
@@ -787,21 +944,24 @@
         }
         // Inventory actions
         case "take":
+            executed.push(`Take: ${cleanedValue}`);
             if (store && store.takeObject) store.takeObject(cleanedValue);
             break;
         case "drop": // This will remove from inventory and add to scene
+            executed.push(`Drop: ${cleanedValue}`);
             if (store && store.addObjectToScene) {
                 // This requires a new action to remove from inventory. For now, let's assume drop just adds it to the scene.
                 store.addObjectToScene(cleanedValue);
             }
             break;
         case "add_object":
+            executed.push(`Add: ${cleanedValue}`);
             if (store && store.addObjectToScene) store.addObjectToScene(cleanedValue);
             break;
       }
     }
 
-    return { text: stripVisualTags(input), stats: { spriteUpdated }, missing };
+    return { text: stripVisualTags(rawText), stats: { spriteUpdated, updatedCharNames }, missing, report: executed.join("; ") };
   }
 
   // ---------------------------
@@ -831,6 +991,7 @@
   window.processVisualTags = processVisualTags;
   window.setVisualDebugMode = setVisualDebugMode;
   window.setSpriteOverrides = setSpriteOverrides;
+  window.setSpinner = setSpinner;
 
   // If other scripts relied on activeSprites directly, this keeps compatibility:
   window.__activeSprites = activeSprites;

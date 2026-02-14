@@ -1,4 +1,4 @@
-import { createStore as create } from 'zustand';
+import { createStore as create } from './vendor/zustand.js';
 
 // Define the store
 export const useStore = create((set) => ({

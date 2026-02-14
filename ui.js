@@ -1,5 +1,5 @@
-/* ============================================================================
-   ui.js — Modal + Settings + Chat Management UI
+﻿/* ============================================================================
+   ui.js â€” Modal + Settings + Chat Management UI
    Goals:
    - Centralize DOM lookups
    - Reduce repeated listeners with event delegation
@@ -8,6 +8,68 @@
    ========================================================================== */
 
 (function () {
+  window.formatApiError = (error, fallback = "Operation failed.") => {
+    const message = (error && error.message) ? String(error.message) : fallback;
+    const ref = error && error.correlationId ? `\n\nRef: ${error.correlationId}` : "";
+    return `${message}${ref}`;
+  };
+
+  window.showErrorModal = (error, fallback = "Operation failed.") => {
+    const text = window.formatApiError(error, fallback);
+    const ref = error?.correlationId || null;
+
+    let modal = $("api-error-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "api-error-modal";
+      modal.className = "modal hidden";
+      modal.innerHTML = `
+        <div class="modal-content" style="width:460px; max-width:90%;">
+          <button id="close-api-error-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
+          <h2 style="margin-top:0;">Error</h2>
+          <p id="api-error-text" style="white-space:pre-wrap; color:#ddd;"></p>
+          <div class="modal-footer">
+            <button id="copy-api-ref-btn" class="tool-btn" type="button" style="display:none;">Copy Ref</button>
+            <button id="ok-api-error-btn" class="tool-btn primary" type="button">OK</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const close = () => hide(modal);
+      $("close-api-error-btn")?.addEventListener("click", close);
+      $("ok-api-error-btn")?.addEventListener("click", close);
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) close();
+      });
+    }
+
+    const textEl = $("api-error-text");
+    const copyBtn = $("copy-api-ref-btn");
+    if (textEl) textEl.textContent = text;
+
+    if (copyBtn) {
+      if (ref) {
+        copyBtn.style.display = "";
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(ref);
+            copyBtn.textContent = "Copied";
+            setTimeout(() => { copyBtn.textContent = "Copy Ref"; }, 1200);
+          } catch {
+            copyBtn.textContent = "Copy failed";
+            setTimeout(() => { copyBtn.textContent = "Copy Ref"; }, 1200);
+          }
+        };
+      } else {
+        copyBtn.style.display = "none";
+        copyBtn.onclick = null;
+      }
+    }
+
+    show(modal);
+  };
+
   // ---------------------------
   // DOM Helpers
   // ---------------------------
@@ -86,6 +148,100 @@
       swapMessageVersion,
     } = callbacks;
 
+    // ---------------------------
+    // HUD Setup (Quest & Affinity)
+    // ---------------------------
+    function setupHUD() {
+        const panel = document.getElementById("vn-panel");
+        if (!panel || document.getElementById("vn-hud")) return;
+
+        const hud = document.createElement("div");
+        hud.id = "vn-hud";
+        hud.style.cssText = "position:absolute; top:60px; left:10px; display:flex; flex-direction:column; gap:5px; pointer-events:none; z-index:100; opacity:0.9; transition: opacity 0.3s ease;";
+        
+        // Objective (Left)
+        const objBox = document.createElement("div");
+        objBox.id = "hud-objective";
+        objBox.style.cssText = "display:none; background:rgba(0,0,0,0.6); color:#fff; padding:6px 12px; border-radius:4px; font-family:sans-serif; font-size:13px; border-left: 3px solid #ffd700; text-shadow: 1px 1px 2px black;";
+        objBox.textContent = "Objective: Explore";
+        
+        // Affinity (Left, under Objective)
+        const affBox = document.createElement("div");
+        affBox.id = "hud-affinity";
+        affBox.style.cssText = "display:none; background:rgba(0,0,0,0.6); color:#fff; padding:6px 12px; border-radius:4px; font-family:sans-serif; font-size:13px; border-left: 3px solid #ff69b4; text-shadow: 1px 1px 2px black;";
+        affBox.textContent = "Affinity: Neutral";
+
+        // Background generation status (under affinity)
+        const bgBox = document.createElement("div");
+        bgBox.id = "hud-bg-status";
+        bgBox.style.cssText = "display:none; background:rgba(0,0,0,0.6); color:#ddd; padding:6px 12px; border-radius:4px; font-family:sans-serif; font-size:12px; border-left: 3px solid #3fa9f5; text-shadow: 1px 1px 2px black;";
+        bgBox.textContent = "Background: Idle";
+
+        hud.appendChild(objBox);
+        hud.appendChild(affBox);
+        hud.appendChild(bgBox);
+        panel.appendChild(hud);
+    }
+
+    function setBackgroundGenerationStatus(status, detail = "") {
+      const el = document.getElementById("hud-bg-status");
+      if (!el) return;
+
+      const s = String(status || "idle").toLowerCase();
+      const d = String(detail || "").trim();
+      const show = () => { el.style.display = "block"; };
+      const hide = () => { el.style.display = "none"; };
+
+      if (window.__bgStatusHideTimer) {
+        clearTimeout(window.__bgStatusHideTimer);
+        window.__bgStatusHideTimer = null;
+      }
+
+      if (s === "generating") {
+        show();
+        el.style.borderLeft = "3px solid #3fa9f5";
+        el.style.color = "#cfe9ff";
+        el.textContent = d ? `Background: Generating (${d})` : "Background: Generating";
+      } else if (s === "fallback") {
+        show();
+        el.style.borderLeft = "3px solid #f5c542";
+        el.style.color = "#ffe9a8";
+        el.textContent = d ? `Background: Using fallback (${d})` : "Background: Using fallback";
+      } else if (s === "retrying") {
+        show();
+        el.style.borderLeft = "3px solid #f59f3f";
+        el.style.color = "#ffd7b0";
+        el.textContent = d ? `Background: Retrying (${d})` : "Background: Retrying";
+      } else if (s === "ready") {
+        show();
+        el.style.borderLeft = "3px solid #3fbf6f";
+        el.style.color = "#ccf5db";
+        el.textContent = d ? `Background: Ready (${d})` : "Background: Ready";
+        window.__bgStatusHideTimer = setTimeout(() => {
+          const node = document.getElementById("hud-bg-status");
+          if (!node) return;
+          node.textContent = "Background: Idle";
+          node.style.display = "none";
+          window.__bgStatusHideTimer = null;
+        }, 1800);
+      } else if (s === "error") {
+        show();
+        el.style.borderLeft = "3px solid #d9534f";
+        el.style.color = "#ffd1cf";
+        el.textContent = d ? `Background: Warning - ${d}` : "Background: Unavailable";
+      } else {
+        el.style.borderLeft = "3px solid #3fa9f5";
+        el.style.color = "#ddd";
+        el.textContent = "Background: Idle";
+        hide();
+      }
+    }
+
+    // Initialize HUD if panel exists
+    setupHUD();
+    window.setupHUD = setupHUD; // Expose for re-init if needed
+    window.setBackgroundGenerationStatus = setBackgroundGenerationStatus;
+
     // -------- DOM refs --------
     const loadModal = $("load-modal");
 
@@ -107,17 +263,17 @@
     const saveChatBtn = $("save-chat-btn");
     const loadChatBtn = $("load-chat-btn");
     const resetChatBtn = $("reset-chat-btn");
-    const hideUiBtn = $("hide-ui-btn");
     const undoBtn = $("undo-btn");
     const redoBtn = $("redo-btn");
-    const treeBtn = $("tree-btn");
     const toggleHistoryBtn = $("toggle-history-btn");
+
     const treeModal = $("tree-modal");
     const closeTreeBtn = $("close-tree-btn");
     const treeViewer = $("tree-viewer");
 
     const thoughtsCharSelect = $("thoughts-char-select");
     const getThoughtsBtn = $("get-thoughts-btn");
+
     const infoModal = $("info-modal");
     const infoTitle = $("info-title");
     const infoText = $("info-text");
@@ -253,7 +409,14 @@
     saveChatBtn?.addEventListener("click", async () => {
       if (!window.messages || window.messages.length === 0) return alert("Nothing to save!");
 
-      const name = prompt("Enter a name for this chat:");
+      try {
+        // Ask the Sidecar for a smart title
+        defaultName = await window.api.getChapterTitle(window.messages);
+      } catch {
+        defaultName = `Save ${new Date().toLocaleTimeString()}`;
+      }
+
+      const name = prompt("Enter a name for this chat:", defaultName);
       if (!name) return;
 
       const success = await window.api.saveChat(name, window.messages);
@@ -267,16 +430,35 @@
       if (!chats || chats.length === 0) {
         savedChatsList.innerHTML = "<p>No saved chats found.</p>";
       } else {
-        // Render once; handle clicks via delegation below
-        chats.forEach((name) => {
-          const div = document.createElement("div");
-          div.className = "key-item";
-          div.innerHTML = `
-            <span>${escapeHtml(name)}</span>
-            <button class="load-select-btn" data-name="${escapeAttr(name)}">Load</button>
-          `;
-          savedChatsList.appendChild(div);
-        });
+        const autosaves = chats
+          .filter((n) => String(n).startsWith("autosave_"))
+          .sort()
+          .reverse();
+        const manual = chats
+          .filter((n) => !String(n).startsWith("autosave_"))
+          .sort((a, b) => a.localeCompare(b));
+
+        const renderSection = (title, names, isAuto = false) => {
+          if (!names.length) return;
+          const h = document.createElement("h3");
+          h.style.cssText = "margin:10px 0 6px; font-size:0.95em; color:#ddd;";
+          h.textContent = title;
+          savedChatsList.appendChild(h);
+
+          names.forEach((name) => {
+            const div = document.createElement("div");
+            div.className = "key-item";
+            const label = isAuto ? formatAutosaveLabel(name) : name;
+            div.innerHTML = `
+              <span>${escapeHtml(label)}</span>
+              <button class="load-select-btn" data-name="${escapeAttr(name)}">Load</button>
+            `;
+            savedChatsList.appendChild(div);
+          });
+        };
+
+        renderSection("Saved Chats", manual, false);
+        renderSection("Recover Autosaves", autosaves, true);
       }
 
       show(loadModal);
@@ -307,11 +489,6 @@
       window.chatSummary = { content: "" };
       await window.api.saveSummary(window.chatSummary);
       await initializeChat();
-    });
-
-    // Hide UI / Theater Mode
-    hideUiBtn?.addEventListener("click", () => {
-      document.body.classList.toggle("ui-hidden");
     });
 
     // History Toggle
@@ -361,9 +538,6 @@
             }
         }
     });
-    $("vn-panel")?.addEventListener("click", () => {
-      if (document.body.classList.contains("ui-hidden")) document.body.classList.remove("ui-hidden");
-    });
 
     undoBtn?.addEventListener("click", () => {
       if (!window.messages || window.messages.length === 0) return;
@@ -384,13 +558,8 @@
     redoBtn?.addEventListener("click", () => regenerateResponse());
 
     // ---------------------------
-    // Tree View
+    // Tree View (Restored & Relocated)
     // ---------------------------
-
-    treeBtn?.addEventListener("click", () => {
-      renderTreeView();
-      show(treeModal);
-    });
 
     closeTreeBtn?.addEventListener("click", () => hide(treeModal));
 
@@ -438,6 +607,44 @@
     }
 
     // ---------------------------
+    // Layout Customization
+    // ---------------------------
+    const toolbar = $("toolbar");
+    const hud = $("vn-hud");
+
+    if (toolbar) {
+      toolbar.style.transition = "opacity 0.3s ease";
+      document.addEventListener("mousemove", (e) => {
+        const inTopZone = e.clientY <= window.innerHeight * 0.25;
+        const opacity = inTopZone ? "1" : "0.3";
+        toolbar.style.opacity = opacity;
+        if (hud) hud.style.opacity = opacity;
+      });
+    }
+
+    // ---------------------------
+    // Button Relocation & History Setup
+    // ---------------------------
+
+    // 2. Add Tree View button inside History Overlay
+    if (historyOverlay) {
+        let historyTreeBtn = $("history-tree-btn");
+        if (!historyTreeBtn) {
+            historyTreeBtn = document.createElement("button");
+            historyTreeBtn.id = "history-tree-btn";
+            historyTreeBtn.textContent = "Show Tree View";
+            historyTreeBtn.className = "tool-btn";
+            historyTreeBtn.style.cssText = "margin: 10px auto; display: block; width: 80%;";
+            historyTreeBtn.onclick = () => {
+                renderTreeView();
+                show(treeModal);
+            };
+            // Insert at the top of the history overlay
+            historyOverlay.insertBefore(historyTreeBtn, historyOverlay.firstChild);
+        }
+    }
+
+    // ---------------------------
     // Helpers inside setupUI scope
     // ---------------------------
 
@@ -454,5 +661,14 @@
       // for data-* attribute; keep it simple + safe
       return escapeHtml(str).replaceAll("`", "&#96;");
     }
+
+    function formatAutosaveLabel(name) {
+      const m = String(name).match(/^autosave_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
+      if (!m) return name;
+      const [, y, mo, d, h, mi, s] = m;
+      return `Autosave ${y}-${mo}-${d} ${h}:${mi}:${s}`;
+    }
   };
 })();
+
+

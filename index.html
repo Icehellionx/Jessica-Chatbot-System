@@ -1,24 +1,17 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Jessica</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' bot-resource: data:; img-src 'self' bot-resource: data:; media-src 'self' bot-resource: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' bot-resource: data:; img-src 'self' bot-resource: data:; media-src 'self' bot-resource: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 
   <link rel="stylesheet" href="styles.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "zustand": "./src/vendor/zustand.js"
-    }
-  }
-  </script>
 </head>
 
 <body>
   <div id="vn-panel">
-    <img id="vn-bg" src="" alt="" />
+    <img id="vn-bg" />
     <div id="vn-sprite"></div><!-- legacy placeholder -->
   </div>
 
@@ -26,23 +19,18 @@
 
   <div id="main-body">
     <div id="toolbar" role="toolbar" aria-label="Chat toolbar">
-      <div class="toolbar-group">
-        <span class="toolbar-label">Theater</span>
-        <button id="hide-ui-btn" class="tool-btn" type="button" title="Hide UI (Theater Mode)">👁️</button>
-      </div>
-      <button id="toggle-history-btn" class="tool-btn" type="button" title="Show/Hide Chat History">📜 History</button>
-      <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">↶ Undo</button>
-      <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">↻ Redo</button>
-      <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">↻ Reset</button>
-      <button id="tree-btn" class="tool-btn" type="button" title="Branch Tree">🌳 Tree</button>
+      <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">&#x21B6; Undo</button>
+      <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">&#x21BB; Redo</button>
+      <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">&#x21BB; Reset</button>
       <div class="toolbar-group">
         <span class="toolbar-label">Thoughts</span>
         <div style="display:flex; align-items:center;">
           <select id="thoughts-char-select" class="tool-btn" style="padding-right: 30px;"></select>
-          <button id="get-thoughts-btn" class="tool-btn" type="button" title="Get Character Thoughts">🧠</button>
+          <button id="get-thoughts-btn" class="tool-btn" type="button" title="Get Character Thoughts">&#x1F9E0;</button>
+          <button id="toggle-history-btn" class="tool-btn" type="button" title="Show/Hide Chat History">&#x1F4DC; History</button>
         </div>
       </div>
-      <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">⚙️ Options</button>
+      <button id="options-btn" class="tool-btn" type="button" title="Settings" aria-haspopup="dialog">&#x2699;&#xFE0F; Options</button>
     </div>
 
     <!-- Spacer to push input area down -->
@@ -55,13 +43,14 @@
         aria-label="Message input"
       ></textarea>
       <button id="send-btn" type="button">Send</button>
+      <button id="stop-btn" type="button" style="display:none;">Stop</button>
     </div>
   </div>
 
   <div id="history-overlay" class="hidden" style="display:none; z-index: 200;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #555; padding-bottom:5px;">
           <h3 style="margin:0; color:#fff;">Chat History</h3>
-          <button id="close-history-btn" class="close-btn" style="position:static; pointer-events:auto;">×</button>
+          <button id="close-history-btn" class="close-btn" style="position:static; pointer-events:auto;">&times;</button>
       </div>
       <div id="chat-history" aria-live="polite" aria-label="Chat messages"></div>
   </div>
@@ -108,15 +97,15 @@
   <!-- Options Modal -->
   <div id="options-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="options-title">
     <div class="modal-content">
-      <button id="close-options-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-options-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="options-title">Options</h2>
 
       <div class="form-group" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-        <button id="save-chat-btn" class="tool-btn" type="button">💾 Save Chat</button>
-        <button id="load-chat-btn" class="tool-btn" type="button">📂 Load Chat</button>
-        <button id="summary-btn" class="tool-btn" type="button">📝 Summary</button>
-        <button id="persona-btn" class="tool-btn" type="button">👤 Persona</button>
-        <button id="lorebook-btn" class="tool-btn" type="button">📖 Lorebook</button>
+        <button id="save-chat-btn" class="tool-btn" type="button">&#x1F4BE; Save Chat</button>
+        <button id="load-chat-btn" class="tool-btn" type="button">&#x1F4C2; Load Chat</button>
+        <button id="summary-btn" class="tool-btn" type="button">&#x1F4DD; Summary</button>
+        <button id="persona-btn" class="tool-btn" type="button">&#x1F464; Persona</button>
+        <button id="lorebook-btn" class="tool-btn" type="button">&#x1F4D6; Lorebook</button>
       </div>
 
       <hr class="divider" />
@@ -160,6 +149,22 @@
 
       <div class="form-group">
         <button id="scan-images-btn" class="tool-btn" type="button" style="width:100%;">Rescan Images</button>
+      </div>
+
+      <div class="form-group">
+        <label for="pollinations-key" style="display:block; margin-bottom:6px;">Pollinations Image Key (Optional)</label>
+        <input type="password" id="pollinations-key" placeholder="Enter Pollinations key for reliable BG generation" autocomplete="off" />
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <button id="save-pollinations-key-btn" class="tool-btn" type="button" style="flex:1;">Save Image Key</button>
+          <button id="clear-pollinations-key-btn" class="tool-btn danger" type="button" style="flex:1;">Clear Image Key</button>
+        </div>
+        <div id="pollinations-key-status" style="margin-top:6px; color:var(--text-muted); font-size:.85em;">Not configured</div>
+        <div style="margin-top:6px; color:var(--text-dim); font-size:.82em; line-height:1.35;">
+          Optional but recommended. A key improves reliability when anonymous requests are rate-limited.
+        </div>
+        <div style="margin-top:8px;">
+          <button id="open-pollinations-key-help-btn" class="tool-btn" type="button" style="width:100%;">How to Get a Pollinations Key</button>
+        </div>
       </div>
 
       <hr class="divider" />
@@ -220,7 +225,7 @@
   <!-- Persona Modal -->
   <div id="persona-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="persona-title">
     <div class="modal-content">
-      <button id="close-persona-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-persona-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="persona-title">User Persona</h2>
 
       <div class="form-group">
@@ -242,7 +247,7 @@
   <!-- Voice Map Modal -->
   <div id="voice-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="voice-title">
     <div class="modal-content">
-      <button id="close-voice-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-voice-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="voice-title">Voice Assignments</h2>
       <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
         Manually assign Piper Speaker IDs (0-900).
@@ -257,7 +262,7 @@
   <!-- Summary Modal -->
   <div id="summary-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="summary-title">
     <div class="modal-content">
-      <button id="close-summary-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-summary-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="summary-title">Story Summary</h2>
       <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
         This is auto-generated to help the AI remember long conversations.
@@ -276,7 +281,7 @@
   <!-- Lorebook Modal -->
   <div id="lorebook-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="lorebook-title">
     <div class="modal-content" style="width:600px; max-width:90%;">
-      <button id="close-lorebook-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-lorebook-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="lorebook-title">Lorebook Editor</h2>
       <p style="font-size:.8em; color:#aaa; margin-top:-10px;">
         View and edit dynamic lore entries generated by the AI.
@@ -300,7 +305,7 @@
   <!-- Tree Modal -->
   <div id="tree-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tree-title">
     <div class="modal-content" style="width: 90%; max-width: 1000px; height: 90vh;">
-      <button id="close-tree-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-tree-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="tree-title">Conversation Tree</h2>
       <p style="color:var(--text-muted); font-size:0.9em;">Click a node to switch to that version.</p>
       <div id="tree-viewer" style="padding: 20px; display: flex; flex-direction: column; align-items: center;"></div>
@@ -323,7 +328,7 @@
   <!-- Load Chat Modal -->
   <div id="load-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="load-title">
     <div class="modal-content">
-      <button id="close-load-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-load-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="load-title">Load Chat</h2>
       <div id="saved-chats-list" style="max-height:300px; overflow-y:auto;"></div>
     </div>
@@ -332,7 +337,7 @@
   <!-- Generic Info Modal (for Inner Monologue) -->
   <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="info-title">
     <div class="modal-content" style="width:500px;">
-      <button id="close-info-btn" class="close-btn" type="button" aria-label="Close">×</button>
+      <button id="close-info-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
       <h2 id="info-title">Inner Monologue</h2>
       <p id="info-text" style="white-space: pre-wrap; line-height: 1.6; color: #ddd; max-height: 60vh; overflow-y: auto;"></p>
     </div>
@@ -346,3 +351,4 @@
   <script type="module" src="renderer.js" defer></script>
 </body>
 </html>
+
