@@ -10,6 +10,7 @@ function registerConfigHandlers({
   readJsonSafe,
   readTextSafe,
   writeJsonSafe,
+  writeTextSafe,
   personaPath,
   summaryPath,
   lorebookPath,
@@ -100,6 +101,9 @@ function registerConfigHandlers({
   });
   ipcMain.handle('save-advanced-prompt', (_e, prompt) => {
     const t = trace.createTrace('save-advanced-prompt');
+    if (typeof writeTextSafe !== 'function') {
+      return trace.fail(t, 'WRITE_TEXT_UNAVAILABLE', 'Text writer is not configured for advanced prompt saves.');
+    }
     return trace.ok(t, writeTextSafe(advancedPromptPath, prompt));
   });
 

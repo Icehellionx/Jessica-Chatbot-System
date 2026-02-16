@@ -1,4 +1,4 @@
-// PATH: ./src/logic.js
+// PATH: ./app/renderer/modules/logic.js
 const sendBtn = document.getElementById('send-btn');
 const input = document.getElementById('user-in');
 const display = document.getElementById('text-display');

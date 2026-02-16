@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createConfigStore } = require('../ipc/config-store');
+const { createConfigStore } = require('../app/main/ipc/config-store');
 
 function makeMemoryStore(initial = {}) {
   let mem = initial;

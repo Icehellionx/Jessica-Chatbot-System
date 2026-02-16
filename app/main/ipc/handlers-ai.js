@@ -51,28 +51,34 @@ function registerAiHandlers({
     return trace.ok(t, false);
   });
 
-  ipcMain.handle('get-inner-monologue', async (_event, characterName, messages) => {
-    const t = trace.createTrace('get-inner-monologue', { characterName: String(characterName || '') });
+  ipcMain.handle('get-inner-monologue-FIXED', async (_event, characterName, messages) => {
+    const t = trace.createTrace('get-inner-monologue-FIXED', { characterName: String(characterName || '') });
+    const name = String(characterName || '').trim();
+    if (!name) {
+      return trace.fail(t, 'INVALID_CHARACTER', 'A character name is required.');
+    }
+
     const config = loadConfig();
-    const cleanMessages = cleanMessagesForApi(messages);
-
-    let personality = '';
-    try {
-      const charDir = path.join(botFilesPath, 'characters');
-      if (fs.existsSync(charDir)) {
-        const entries = fs.readdirSync(charDir, { withFileTypes: true });
-        const entry = entries.find((e) => e.isDirectory() && e.name.toLowerCase() === String(characterName).toLowerCase());
-        if (entry) {
-          personality = readTextSafe(path.join(charDir, entry.name, 'personality.txt'), '');
-        }
-      }
-    } catch {}
+    const normalizedMessages = Array.isArray(messages)
+      ? messages.map((m) => ({
+          role: m?.role === 'assistant' ? 'assistant' : 'user',
+          content: String(m?.content ?? ''),
+        }))
+      : [];
+    const personalityPath = path.join(botFilesPath, 'characters', name, 'personality.txt');
+    const personality = fs.existsSync(personalityPath) ? readTextSafe(personalityPath, '').slice(0, 8000) : '';
 
     try {
-      const result = await aiService.fetchInnerMonologue(config, characterName, cleanMessages, personality);
-      return trace.ok(t, result);
+      const monologue = await aiService.fetchInnerMonologue(config, name, normalizedMessages, personality);
+      return trace.ok(t, String(monologue || '').trim());
     } catch (error) {
-      return trace.fail(t, 'INNER_MONOLOGUE_ERROR', trace.normalizeErrorMessage(error, 'Failed to generate inner monologue.'), null, error);
+      return trace.fail(
+        t,
+        'INNER_MONOLOGUE_ERROR',
+        trace.normalizeErrorMessage(error, 'Failed to generate inner monologue.'),
+        { characterName: name },
+        error
+      );
     }
   });
 

@@ -6,8 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { sanitizeFilename } = require('../ipc/sanitize');
-const { createChatStorage } = require('../ipc/chat-storage');
+const { sanitizeFilename } = require('../app/main/ipc/sanitize');
+const { createChatStorage } = require('../app/main/ipc/chat-storage');
 
 test('sanitizeFilename strips traversal and unsafe characters', () => {
   assert.equal(sanitizeFilename('../My Chat:../../evil?.json'), '___my_chat_______evil__json');

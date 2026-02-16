@@ -43,8 +43,8 @@ function bootstrapVisuals() {
   global.setTimeout = setTimeout;
   global.clearTimeout = clearTimeout;
 
-  delete require.cache[require.resolve('../visuals.js')];
-  require('../visuals.js');
+  delete require.cache[require.resolve('../app/renderer/visuals.js')];
+  require('../app/renderer/visuals.js');
 }
 
 test('processVisualTags only executes tags inside [SCENE] block', () => {

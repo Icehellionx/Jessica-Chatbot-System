@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('api', {
     saveLorebook: (content) => invokeSafe('save-lorebook', content),
     getImages: () => invokeSafe('get-images'),
     getImageManifest: () => invokeSafe('get-image-manifest'),
-    getInnerMonologue: (charName, messages) => invokeSafe('get-inner-monologue', charName, messages),
+    getInnerMonologue: (charName, messages) => invokeSafe('get-inner-monologue-FIXED', charName, messages),
     getStageDirections: (text, activeChars, context) => invokeSafe('get-stage-directions', text, activeChars, context),
     getReplySuggestions: (messages) => invokeSafe('get-reply-suggestions', messages),
     getChapterTitle: (messages) => invokeSafe('get-chapter-title', messages),

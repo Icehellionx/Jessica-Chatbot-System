@@ -6,7 +6,7 @@
   <title>Jessica</title>
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' bot-resource: data:; img-src 'self' bot-resource: data:; media-src 'self' bot-resource: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="app/renderer/styles.css">
 </head>
 
 <body>
@@ -344,11 +344,12 @@
   </div>
 
   <!-- Scripts (defer preserves order while not blocking HTML parsing) -->
-  <script src="audio.js" defer></script>
-  <script src="visuals.js" defer></script>
-  <script src="ui.js" defer></script>
-  <script src="settings-ui.js" defer></script>
-  <script type="module" src="renderer.js" defer></script>
+  <script src="app/renderer/audio.js" defer></script>
+  <script src="app/renderer/visuals.js" defer></script>
+  <script src="app/renderer/ui.js" defer></script>
+  <script src="app/renderer/settings-ui.js" defer></script>
+  <script type="module" src="app/renderer/renderer.js" defer></script>
 </body>
 </html>
+
 

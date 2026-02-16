@@ -17,6 +17,7 @@ const { registerChatHandlers } = require('./ipc/handlers-chat');
 const { registerMediaHandlers } = require('./ipc/handlers-media');
 const { registerVoiceHandlers } = require('./ipc/handlers-voice');
 const { registerAiHandlers } = require('./ipc/handlers-ai');
+const { resolveMediaAbsolutePath } = require('./ipc/media-paths');
 
 /* ============================================================================
    IPC MAIN HANDLERS (Electron)
@@ -233,28 +234,6 @@ function createTreeList(files, category, manifest) {
   }
 
   return lines.join('\n');
-}
-
-/**
- * Convert a manifest entry path (like "backgrounds/foo.png" or "characters/jessica/a.png")
- * into an absolute on-disk path.
- */
-function resolveMediaAbsolutePath({ botImagesPath, botFilesPath }, relativePath) {
-  const parts = String(relativePath).split(/[\/\\]/);
-  const rootKey = parts[0];
-
-  // backgrounds/splash/music/sprites live under botImagesPath
-  if (rootKey === 'backgrounds' || rootKey === 'splash' || rootKey === 'music' || rootKey === 'sprites') {
-    return path.join(botImagesPath, relativePath);
-  }
-
-  // characters live under botFilesPath
-  if (rootKey === 'characters') {
-    return path.join(botFilesPath, relativePath);
-  }
-
-  // fallback (safer than assuming botFilesPath)
-  return path.join(botImagesPath, relativePath);
 }
 
 /* ------------------------------ TOKEN EST -------------------------------- */
@@ -969,8 +948,29 @@ module.exports = function registerIpcHandlers(paths) {
     return aiService.determineActiveContext(config, messages, candidates);
   });
 
+  ipcMain.handle('review-visuals', async (event, options) => {
+    const config = loadConfig();
+    const manifest = getManifest();
+    
+    const availableBackgrounds = Object.keys(manifest.backgrounds || {});
+    const allSprites = getFiles('sprites');
+
+    return aiService.reviewVisuals(config, {
+      ...options,
+      availableBackgrounds,
+      availableSprites: allSprites,
+    });
+  });
+
+  ipcMain.handle('generate-dynamic-event', async (event, options) => {
+    const config = loadConfig();
+    return aiService.generateDynamicEvent(config, options);
+  });
+
+
   ipcMain.handle('check-file-exists', async (event, relativePath) => {
     const fullPath = resolveMediaAbsolutePath({ botImagesPath: paths.botImagesPath, botFilesPath: paths.botFilesPath }, relativePath);
+    if (!fullPath) return false;
     return fs.existsSync(fullPath);
   });
 
@@ -994,6 +994,7 @@ module.exports = function registerIpcHandlers(paths) {
     readJsonSafe,
     readTextSafe,
     writeJsonSafe,
+    writeTextSafe,
     personaPath,
     summaryPath,
     lorebookPath,

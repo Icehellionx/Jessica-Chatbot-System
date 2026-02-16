@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyContextWindow, estimateTokensFromMessageContent } = require('../ipc/context-window');
+const { applyContextWindow, estimateTokensFromMessageContent } = require('../app/main/ipc/context-window');
 
 test('estimateTokensFromMessageContent handles text and multipart content', () => {
   assert.equal(estimateTokensFromMessageContent('abcd'), 1);

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { __private } = require('../ai_services');
+const { __private } = require('../app/main/ai_services');
 
 test('buildChatCompletionsBody sets expected OpenAI-compatible fields', () => {
   const body = __private.buildChatCompletionsBody(
@@ -51,4 +51,14 @@ test('createOpenAISSEParser recovers tokens across split chunks', () => {
   parser('data: [DONE]\n');
 
   assert.deepEqual(tokens, ['Hello', ' world']);
+});
+
+test('parseFirstJsonObject parses array payloads with preamble text', () => {
+  const parsed = __private.parseFirstJsonObject('Result:\n["opt1","opt2"]');
+  assert.deepEqual(parsed, ['opt1', 'opt2']);
+});
+
+test('parseFirstJsonObject still parses object payloads', () => {
+  const parsed = __private.parseFirstJsonObject('debug {"score":88,"status":"Good"} tail');
+  assert.deepEqual(parsed, { score: 88, status: 'Good' });
 });

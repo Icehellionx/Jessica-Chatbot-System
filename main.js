@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
@@ -150,7 +150,7 @@ function createWindow() {
     height: 768,
     backgroundColor: '#222222',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'app', 'main', 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },
@@ -173,7 +173,7 @@ function autosaveIfNeeded() {
 
     const data = JSON.parse(raw);
 
-    // Only autosave if there’s at least one user message
+    // Only autosave if thereâ€™s at least one user message
     const msgs = data?.messages;
     if (!Array.isArray(msgs) || !msgs.some(m => m?.role === 'user')) return;
 
@@ -209,7 +209,7 @@ app.whenReady().then(() => {
     configPath: path.join(userDataPath, 'config.json'),
     chatsPath: path.join(userDataPath, 'chats'),
 
-    // You currently store both “files” and “images” under bot/files.
+    // You currently store both â€œfilesâ€ and â€œimagesâ€ under bot/files.
     // If you later split, set botImagesPath to a different directory.
     botFilesPath: path.join(__dirname, 'bot', 'files'),
     botImagesPath: path.join(__dirname, 'bot', 'files'),
@@ -232,7 +232,7 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  require('./ipcHandlers')(paths);
+  require('./app/main/ipcHandlers')(paths);
 });
 
 app.on('window-all-closed', () => {
@@ -244,3 +244,4 @@ app.on('window-all-closed', () => {
 });
 
 /* ------------------------------ IPC HANDLERS ----------------------------- */
+
