@@ -22,6 +22,7 @@
       <button id="undo-btn" class="tool-btn" type="button" title="Undo Last Turn">&#x21B6; Undo</button>
       <button id="redo-btn" class="tool-btn" type="button" title="Regenerate Response">&#x21BB; Redo</button>
       <button id="reset-chat-btn" class="tool-btn" type="button" title="Reset Chat">&#x21BB; Reset</button>
+      <button id="phone-btn" class="tool-btn" type="button" title="Phone / Text Threads">&#x1F4F1; Phone</button>
       <div class="toolbar-group">
         <span class="toolbar-label">Thoughts</span>
         <div style="display:flex; align-items:center;">
@@ -343,11 +344,54 @@
     </div>
   </div>
 
+  <!-- Phone Modal -->
+  <div id="phone-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="phone-title">
+    <div class="modal-content" style="width:860px; max-width:96%; height:80vh; display:grid; grid-template-columns:280px 1fr; gap:12px;">
+      <button id="close-phone-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
+      <div style="display:flex; flex-direction:column; min-height:0;">
+        <h2 id="phone-title" style="margin-top:0;">Phone</h2>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <button id="phone-refresh-btn" class="tool-btn" type="button">Refresh</button>
+          <button id="phone-new-thread-btn" class="tool-btn primary" type="button">New Thread</button>
+        </div>
+        <div id="phone-thread-list" style="overflow:auto; border:1px solid var(--border); border-radius:8px; padding:8px; background:#1f1f1f;"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; min-height:0;">
+        <h3 id="phone-thread-header" style="margin:0 0 8px;">Select a thread</h3>
+        <div id="phone-thread-messages" style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px; padding:10px; background:#181818;"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <textarea id="phone-input" rows="2" placeholder="Type a text..." style="flex:1; resize:none;"></textarea>
+          <button id="phone-send-btn" class="tool-btn primary" type="button">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Thread Modal -->
+  <div id="phone-new-thread-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="phone-new-thread-title">
+    <div class="modal-content" style="width:460px;">
+      <button id="close-phone-new-thread-btn" class="close-btn" type="button" aria-label="Close">&times;</button>
+      <h2 id="phone-new-thread-title">New Thread</h2>
+      <div class="form-group">
+        <label for="phone-thread-title-input">Thread title (optional)</label>
+        <input id="phone-thread-title-input" type="text" placeholder="e.g. Weekend Plans">
+      </div>
+      <div class="form-group">
+        <label>Participants (known contacts)</label>
+        <div id="phone-contact-list" style="max-height:240px; overflow:auto; border:1px solid var(--border); border-radius:8px; padding:10px; background:#1f1f1f;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="phone-create-thread-confirm-btn" class="tool-btn primary" type="button">Create Thread</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts (defer preserves order while not blocking HTML parsing) -->
   <script src="app/renderer/audio.js" defer></script>
   <script src="app/renderer/visuals.js" defer></script>
   <script src="app/renderer/ui.js" defer></script>
   <script src="app/renderer/settings-ui.js" defer></script>
+  <script src="app/renderer/phone-ui.js" defer></script>
   <script type="module" src="app/renderer/renderer.js" defer></script>
 </body>
 </html>

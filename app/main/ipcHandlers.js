@@ -17,6 +17,7 @@ const { registerChatHandlers } = require('./ipc/handlers-chat');
 const { registerMediaHandlers } = require('./ipc/handlers-media');
 const { registerVoiceHandlers } = require('./ipc/handlers-voice');
 const { registerAiHandlers } = require('./ipc/handlers-ai');
+const { registerPhoneHandlers } = require('./ipc/handlers-phone');
 const { resolveMediaAbsolutePath } = require('./ipc/media-paths');
 
 /* ============================================================================
@@ -802,6 +803,8 @@ module.exports = function registerIpcHandlers(paths) {
     lorebookPath,
     voiceMapPath,
     voiceBucketsPath,
+    phoneThreadsPath,
+    phoneContactsPath,
   } = paths;
 
   const cache = createCache();
@@ -1083,6 +1086,21 @@ module.exports = function registerIpcHandlers(paths) {
     buildEnforcementRules,
     applyContextWindow: contextWindow.applyContextWindow,
     structuredCloneSafe,
+    trace,
+  });
+
+  registerPhoneHandlers({
+    ipcMain,
+    aiService,
+    loadConfig,
+    readJsonSafe,
+    writeJsonSafe,
+    readTextSafe,
+    phoneThreadsPath,
+    phoneContactsPath,
+    botFilesPath,
+    fs,
+    path,
     trace,
   });
 };

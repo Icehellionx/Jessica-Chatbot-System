@@ -222,6 +222,8 @@ app.whenReady().then(() => {
     lorebookPath: path.join(userDataPath, 'aura_lorebook.json'),
     voiceMapPath: path.join(userDataPath, 'voice_map.json'),
     voiceBucketsPath: path.join(userDataPath, 'voice_buckets.json'),
+    phoneThreadsPath: path.join(userDataPath, 'phone_threads.json'),
+    phoneContactsPath: path.join(userDataPath, 'phone_contacts.json'),
   };
 
   ensureRequiredDirs(paths);

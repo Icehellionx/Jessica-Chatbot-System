@@ -1,0 +1,12 @@
+{
+  "starterKnownNumbers": {
+    "jake": true
+  },
+  "photoMessaging": {
+    "enabled": true,
+    "chance": 0.22,
+    "replyChance": 0.18,
+    "maxPerTick": 1,
+    "maxReplyPhotos": 1
+  }
+}

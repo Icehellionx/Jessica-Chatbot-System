@@ -71,6 +71,7 @@ export function createAppInitializer(deps) {
     windowObj.setupVisuals();
     setupStateSubscribers();
     windowObj.setupUI({ initializeChat, renderChat, saveCurrentChatState, regenerateResponse, swapMessageVersion });
+    if (windowObj.setupPhoneUI) windowObj.setupPhoneUI();
     if (windowObj.setupHUD) windowObj.setupHUD();
     if (windowObj.setBackgroundGenerationStatus) windowObj.setBackgroundGenerationStatus('idle');
     if (windowObj.setupSettingsUI) windowObj.setupSettingsUI({ initializeChat });

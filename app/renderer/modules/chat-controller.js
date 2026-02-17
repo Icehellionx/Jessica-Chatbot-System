@@ -20,6 +20,76 @@ export function createChatController(deps) {
     onTurnCompleted,
   } = deps;
 
+  async function runPhoneTick(responseContent, sceneCharacters) {
+    if (!windowObj.api?.phonePollUpdates) return null;
+    try {
+      const visibleCharacters = windowObj.getActiveSpriteNames ? windowObj.getActiveSpriteNames() : [];
+      const activeCharacters = Array.from(new Set([...(sceneCharacters || []), ...(visibleCharacters || [])]));
+      return await windowObj.api.phonePollUpdates({
+        trigger: 'main-chat',
+        minIntervalMs: 0,
+        storyText: responseContent || '',
+        activeCharacters,
+      });
+    } catch (e) {
+      console.warn('[PhoneSim] Tick failed:', e);
+      return null;
+    }
+  }
+
+  function maybeShowPhoneUnlockNotice(phoneTickResult) {
+    const unlocked = Array.isArray(phoneTickResult?.newlyUnlockedContacts)
+      ? phoneTickResult.newlyUnlockedContacts.filter(Boolean)
+      : [];
+    if (!unlocked.length) return;
+    const unique = [...new Set(unlocked)];
+    const label = unique.join(', ');
+    const verb = unique.length > 1 ? 'shared their numbers' : 'shared their number';
+    if (windowObj.showStatusPopup) {
+      windowObj.showStatusPopup(`${label} ${verb}. You can text them now.`, { title: 'Phone Update' });
+    }
+  }
+
+  async function maybeShowUnreadNotice(phoneTickResult) {
+    if (!windowObj.api?.phoneListThreads) return;
+
+    let threads = [];
+    try {
+      threads = await windowObj.api.phoneListThreads();
+    } catch {
+      return;
+    }
+    const unreadTotal = Array.isArray(threads)
+      ? threads.reduce((sum, t) => sum + Number(t?.unreadCount || 0), 0)
+      : 0;
+    const state = windowObj.__phoneUnreadNoticeState || { lastUnreadNotified: 0, lastNoticeAt: 0 };
+    const now = Date.now();
+    const incomingMessages = Number(phoneTickResult?.incomingMessages || 0);
+
+    if (unreadTotal <= 0) {
+      state.lastUnreadNotified = 0;
+      windowObj.__phoneUnreadNoticeState = state;
+      return;
+    }
+
+    const increased = unreadTotal > Number(state.lastUnreadNotified || 0);
+    const cooldownPassed = now - Number(state.lastNoticeAt || 0) > 180_000;
+    const shouldNotify = increased || (incomingMessages > 0 && cooldownPassed);
+    if (!shouldNotify) {
+      state.lastUnreadNotified = Math.min(Number(state.lastUnreadNotified || 0), unreadTotal);
+      windowObj.__phoneUnreadNoticeState = state;
+      return;
+    }
+
+    const suffix = unreadTotal === 1 ? '' : 's';
+    if (windowObj.showStatusPopup) {
+      windowObj.showStatusPopup(`You have ${unreadTotal} unread phone message${suffix}.`, { title: 'Phone' });
+    }
+    state.lastUnreadNotified = unreadTotal;
+    state.lastNoticeAt = now;
+    windowObj.__phoneUnreadNoticeState = state;
+  }
+
   async function handleSend() {
     if (await handleStalledConversation()) {
       return;
@@ -82,6 +152,10 @@ export function createChatController(deps) {
       }
 
       await runSidecarEnhancements(response, sceneCharacters);
+
+      const phoneTickResult = await runPhoneTick(response.content, sceneCharacters);
+      maybeShowPhoneUnlockNotice(phoneTickResult);
+      await maybeShowUnreadNotice(phoneTickResult);
 
       await saveCurrentChatState();
       renderChat();

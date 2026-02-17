@@ -70,6 +70,65 @@
     show(modal);
   };
 
+  window.showStatusPopup = (message, options = {}) => {
+    const text = String(message || '').trim();
+    if (!text) return;
+
+    let host = document.getElementById("status-popup-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "status-popup-host";
+      host.style.cssText = [
+        "position:fixed",
+        "top:74px",
+        "right:14px",
+        "z-index:12000",
+        "display:flex",
+        "flex-direction:column",
+        "gap:8px",
+        "pointer-events:none",
+        "max-width:380px",
+      ].join(";");
+      document.body.appendChild(host);
+    }
+
+    const card = document.createElement("div");
+    card.style.cssText = [
+      "pointer-events:auto",
+      "background:rgba(32,32,32,0.95)",
+      "border:1px solid rgba(255,255,255,0.2)",
+      "border-left:4px solid #2f89d9",
+      "color:#f2f2f2",
+      "padding:10px 12px",
+      "border-radius:8px",
+      "box-shadow:0 8px 18px rgba(0,0,0,0.45)",
+      "font-size:13px",
+      "line-height:1.35",
+      "cursor:pointer",
+      "opacity:0",
+      "transform:translateY(-6px)",
+      "transition:opacity 180ms ease, transform 180ms ease",
+    ].join(";");
+    const title = String(options.title || "Status").trim();
+    card.innerHTML = `<strong style="display:block; margin-bottom:4px; color:#9fd0ff;">${title}</strong><span>${text}</span>`;
+    host.appendChild(card);
+    requestAnimationFrame(() => {
+      card.style.opacity = "1";
+      card.style.transform = "translateY(0)";
+    });
+
+    const remove = () => {
+      card.style.opacity = "0";
+      card.style.transform = "translateY(-6px)";
+      setTimeout(() => card.remove(), 180);
+    };
+    card.addEventListener("click", remove);
+    const durationMs = Number(options.durationMs || 6500);
+    if (!options.sticky) setTimeout(remove, durationMs);
+  };
+
+  window.showToast = (message) => window.showStatusPopup(message, { title: "Update" });
+
   // ---------------------------
   // DOM Helpers
   // ---------------------------
@@ -488,6 +547,9 @@
 
       window.chatSummary = { content: "" };
       await window.api.saveSummary(window.chatSummary);
+      if (window.api.phoneResetState) {
+        await window.api.phoneResetState();
+      }
       await initializeChat();
     });
 

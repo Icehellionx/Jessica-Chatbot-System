@@ -66,6 +66,15 @@ contextBridge.exposeInMainWorld('api', {
     testProvider: () => invokeSafe('test-provider'),
     generateSpeech: (text, voiceId, forcedSpeakerId) => invokeSafe('generate-speech', text, voiceId, forcedSpeakerId),
     generateImage: (prompt, type) => invokeSafe('generate-image', prompt, type),
+    phoneListThreads: () => invokeSafe('phone-list-threads'),
+    phoneGetThread: (threadId) => invokeSafe('phone-get-thread', threadId),
+    phoneCreateThread: (payload) => invokeSafe('phone-create-thread', payload),
+    phoneMarkRead: (threadId) => invokeSafe('phone-mark-read', threadId),
+    phoneSendMessage: (threadId, text, options) => invokeSafe('phone-send-message', threadId, text, options),
+    phonePollUpdates: (options) => invokeSafe('phone-poll-updates', options),
+    phoneGetContacts: () => invokeSafe('phone-get-contacts'),
+    phoneSetContactKnown: (name, hasNumber) => invokeSafe('phone-set-contact-known', name, hasNumber),
+    phoneResetState: () => invokeSafe('phone-reset-state'),
     cancelChat: () => invokeSafe('cancel-chat'),
     onChatReplyChunk: (callback) => {
         const subscription = (event, chunk) => callback(chunk);
